@@ -15,7 +15,7 @@ import {
   getGraphSchema,
   indexStatus,
 } from '../query/tools.ts';
-import { buildIndex, semanticQuery, searchCode as searchCodeFts } from '../search/service.ts';
+import { buildIndex, buildIndexAsync, semanticQuery, searchCode as searchCodeFts } from '../search/service.ts';
 import { exportArtifact, importArtifact } from '../artifact.ts';
 import { listAdr, getAdr, updateAdr } from '../query/adr.ts';
 
@@ -344,7 +344,12 @@ async function main(argv: string[]): Promise<void> {
     if (tool === 'build_index') {
       const project = args.project;
       if (!project) throw new Error('--project is required');
-      const result = buildIndex(store, project);
+      let result;
+      if (args.use_model) {
+        result = await buildIndexAsync(store, project);
+      } else {
+        result = buildIndex(store, project);
+      }
       console.log(JSON.stringify(result, null, 2));
       store.close();
       return;
@@ -355,7 +360,9 @@ async function main(argv: string[]): Promise<void> {
       const query = args.query;
       if (!project || !query) throw new Error('--project and --query are required');
       const limit = args.limit ? Number(args.limit) : 10;
-      const result = semanticQuery(store, project, query, limit);
+      const result = semanticQuery(store, project, query, limit, {
+        signals: args.signals ? args.signals !== 'false' : undefined,
+      });
       console.log(JSON.stringify(result, null, 2));
       store.close();
       return;

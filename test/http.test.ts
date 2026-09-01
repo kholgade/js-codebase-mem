@@ -54,6 +54,21 @@ test('GET / returns HTML page', async () => {
   assert.match(body, /Graph Explorer/);
 });
 
+test('GET / HTML exposes UI enhancement hooks', async () => {
+  const res = await fetch(base + '/');
+  const body = await res.text();
+  assert.match(body, /id="panel"/);
+  assert.match(body, /id="panelClose"/);
+  assert.match(body, /id="layoutSel"/);
+  assert.match(body, /value="sphere"/);
+  assert.match(body, /value="grid"/);
+  assert.match(body, /id="edgeLabels"/);
+  assert.match(body, /id="exportPng"/);
+  assert.match(body, /id="exportSvg"/);
+  assert.match(body, /selectNode/);
+  assert.match(body, /graph-/);
+});
+
 test('GET /api/projects returns project list', async () => {
   const res = await fetch(base + '/api/projects');
   assert.equal(res.status, 200);
@@ -88,6 +103,33 @@ test('GET /api/node/:id returns node detail', async () => {
   const node = await detail.json();
   assert.equal(node.id, id);
   assert.ok(node.name);
+});
+
+test('GET /api/projects/:project/nodes/:id returns node and edges', async () => {
+  const nodes = await (await fetch(base + '/api/nodes?project=test-proj')).json();
+  const id = nodes[0].id;
+  const res = await fetch(base + '/api/projects/test-proj/nodes/' + id);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(data.node);
+  assert.equal(data.node.id, id);
+  assert.ok(data.node.name && data.node.qualified && data.node.file);
+  assert.ok(Array.isArray(data.edges));
+  assert.equal(data.edges.length, 2);
+  data.edges.forEach((e) => {
+    assert.ok(e.type);
+    assert.ok(e.direction === 'out' || e.direction === 'in');
+    assert.equal(typeof e.neighbor_id, 'number');
+    assert.ok(e.neighbor_name);
+  });
+  const outEdges = data.edges.filter((e) => e.direction === 'out');
+  const inEdges = data.edges.filter((e) => e.direction === 'in');
+  assert.ok(outEdges.length === 2 && inEdges.length === 0);
+});
+
+test('GET /api/projects/:project/nodes/999999 returns 404', async () => {
+  const res = await fetch(base + '/api/projects/test-proj/nodes/999999');
+  assert.equal(res.status, 404);
 });
 
 test('GET unknown route returns 404', async () => {

@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS edges (
   dst INTEGER,
   type TEXT NOT NULL,
   confidence TEXT NOT NULL,
-  site_line INTEGER
+  site_line INTEGER,
+  trace_hits INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src);
 CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst);
@@ -70,6 +71,15 @@ CREATE TABLE IF NOT EXISTS node_embeddings (
   project TEXT NOT NULL,
   vec BLOB
 );
+CREATE TABLE IF NOT EXISTS traces (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  name TEXT,
+  root TEXT,
+  calls TEXT NOT NULL,
+  created_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_traces_proj ON traces(project);
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
   name, qualified, signature, doc,
   content='nodes',
@@ -99,6 +109,12 @@ export class Store {
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec('PRAGMA synchronous = NORMAL;');
     this.db.exec(SCHEMA);
+    // Idempotent migration for existing DBs created before trace_hits existed.
+    try {
+      this.db.exec('ALTER TABLE edges ADD COLUMN trace_hits INTEGER DEFAULT 0');
+    } catch {
+      // column already present
+    }
   }
 
   get underlying(): DatabaseSync {
@@ -121,6 +137,7 @@ export class Store {
     this.db.prepare('DELETE FROM node_embeddings WHERE project = ?').run(project);
     this.db.prepare('DELETE FROM nodes WHERE project = ?').run(project);
     this.db.prepare('DELETE FROM files WHERE project = ?').run(project);
+    this.db.prepare('DELETE FROM traces WHERE project = ?').run(project);
     this.db.prepare('DELETE FROM projects WHERE name = ?').run(project);
   }
 
@@ -211,6 +228,18 @@ export class Store {
 
   queryOne(sql: string, params: any[] = []): Record<string, any> | undefined {
     return this.db.prepare(sql).get(...params) as any;
+  }
+
+  ingestTrace(project: string, trace: { name?: string; root?: string; calls: string[] }): number {
+    const res = this.db
+      .prepare(`INSERT INTO traces (project, name, root, calls, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(project, trace.name ?? null, trace.root ?? trace.calls[0] ?? null, JSON.stringify(trace.calls), Date.now());
+    return Number(res.lastInsertRowid);
+  }
+
+  getTraces(project: string): Array<{ id: number; name: string | null; root: string | null; calls: string[]; created_at: number }> {
+    const rows = this.db.prepare('SELECT * FROM traces WHERE project = ? ORDER BY id').all(project) as any[];
+    return rows.map((r) => ({ ...r, calls: JSON.parse(r.calls ?? '[]') }));
   }
 
   close(): void {

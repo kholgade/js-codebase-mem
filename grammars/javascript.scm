@@ -38,3 +38,21 @@
 (call_expression
   function: (member_expression
     property: (property_identifier) @call.target))
+
+; HTTP routes — Express-style app.get('/path', handler)
+(call_expression
+  function: (member_expression
+    object: (identifier) @route.app
+    property: (property_identifier) @route.method)
+  arguments: (arguments
+    (string (string_fragment) @route.path)
+    (arrow_function) @route.handler))
+
+; HTTP routes — handler as named function reference
+(call_expression
+  function: (member_expression
+    object: (identifier) @route.app
+    property: (property_identifier) @route.method)
+  arguments: (arguments
+    (string (string_fragment) @route.path)
+    (identifier) @route.handler))

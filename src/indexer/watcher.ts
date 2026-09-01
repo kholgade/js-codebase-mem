@@ -13,6 +13,17 @@ const DEFAULT_IGNORE = new Set([
   '.gitignore', 'coverage', '.tox', '.mypy_cache', '.pytest_cache', 'vendor', '.terraform',
 ]);
 
+// Incremental re-index result
+export interface IncrementalIndexResult {
+  project: string;
+  filesProcessed: number;
+  filesSkipped: number;
+  filesPruned: number;
+  nodes: number;
+  edges: number;
+  durationMs: number;
+}
+
 export interface ProjectWatcherOptions {
   project: string;
   repoPath: string;
@@ -121,6 +132,70 @@ export class ProjectWatcher {
       if (this.pendingReindex) {
         this.pendingReindex = false;
         void this.reindex();
+      }
+    }
+  }
+
+  /**
+   * Incremental re-index: only processes changed files and updates the graph.
+   * More efficient than full re-index for large codebases.
+   */
+  async reindexIncremental(): Promise<IncrementalIndexResult> {
+    if (this.indexing) {
+      this.pendingReindex = true;
+      return {
+        project: this.project,
+        filesProcessed: 0,
+        filesSkipped: 0,
+        filesPruned: 0,
+        nodes: 0,
+        edges: 0,
+        durationMs: 0,
+      };
+    }
+    this.indexing = true;
+    const t0 = Date.now();
+    try {
+      const changes = await this.scanChanges();
+      let filesPruned = 0;
+
+      // Prune graph for changed files
+      for (const rel of changes) {
+        this.pruneFile(rel);
+        filesPruned++;
+      }
+
+      // Re-index only changed files
+      const result = await indexRepository({
+        project: this.project,
+        repoPath: this.repoPath,
+        store: this.store,
+        registry: this.registry,
+      });
+
+      // Clean up missing files
+      pruneMissingFiles(this.store, this.project, this.repoPath);
+
+      this._lastIndex = result;
+      this.dirty = false;
+
+      const incrementalResult: IncrementalIndexResult = {
+        project: this.project,
+        filesProcessed: result.indexedFiles,
+        filesSkipped: result.skippedUpToDate,
+        filesPruned,
+        nodes: result.nodes,
+        edges: result.edges,
+        durationMs: Date.now() - t0,
+      };
+
+      this.onIndex?.(result);
+      return incrementalResult;
+    } finally {
+      this.indexing = false;
+      if (this.pendingReindex) {
+        this.pendingReindex = false;
+        void this.reindexIncremental();
       }
     }
   }

@@ -13,7 +13,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 #toolbar{position:fixed;top:0;left:0;right:0;height:48px;background:#161b22;border-bottom:1px solid #30363d;display:flex;align-items:center;padding:0 16px;gap:12px;z-index:10}
 #toolbar label{font-size:13px;color:#8b949e}
 #toolbar select,#toolbar input{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:13px}
-#toolbar input{width:200px}
+#toolbar input[type=text]{width:200px}
+#toolbar .btn{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;transition:background .15s}
+#toolbar .btn:hover{background:#30363d}
+#toolbar .btn.primary{background:#238636;border-color:#2ea043;color:#fff}
+#toolbar .btn.primary:hover{background:#2ea043}
+#toolbar input[type=checkbox]{width:auto;accent-color:#58a6ff}
 #legend{position:fixed;top:56px;left:8px;background:#161b22ee;border:1px solid #30363d;border-radius:8px;padding:10px 12px;font-size:12px;z-index:10;max-height:calc(100vh - 80px);overflow-y:auto}
 #legend h3{font-size:11px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
 .leg-item{display:flex;align-items:center;gap:6px;margin:3px 0}
@@ -22,6 +27,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 #tooltip .tname{font-weight:600;color:#f0f6fc;margin-bottom:2px}
 #tooltip .tdetail{color:#8b949e;font-size:11px}
 #stats{position:fixed;bottom:8px;right:8px;background:#161b22ee;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:11px;color:#8b949e;z-index:10}
+#panel{position:fixed;top:56px;right:8px;bottom:8px;width:320px;background:#161b22f2;border:1px solid #30363d;border-radius:8px;z-index:15;display:none;flex-direction:column;overflow:hidden}
+#panel.open{display:flex}
+#panel .phead{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #30363d}
+#panel .phead h3{margin:0;font-size:13px;color:#f0f6fc}
+#panel .pclose{background:none;border:none;color:#8b949e;font-size:18px;cursor:pointer;line-height:1}
+#panel .pclose:hover{color:#f0f6fc}
+#panel .pbody{padding:12px;overflow-y:auto}
+#panel .plabel{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:0.4px;margin:12px 0 4px}
+#panel .pval{font-size:12px;color:#e6edf3;word-break:break-word;white-space:pre-wrap}
+#panel .pkind{display:inline-block;font-size:10px;padding:2px 6px;border-radius:4px;margin-bottom:6px;color:#0d1117;font-weight:600}
 canvas{display:block}
 </style>
 </head>
@@ -29,11 +44,24 @@ canvas{display:block}
 <div id="toolbar">
   <label>Project:</label>
   <select id="projectSel"><option>Loading...</option></select>
+  <label>Layout:</label>
+  <select id="layoutSel">
+    <option value="force">Force</option>
+    <option value="sphere">Sphere</option>
+    <option value="grid">Grid</option>
+  </select>
+  <label><input type="checkbox" id="edgeLabels"> Edge labels</label>
+  <button id="exportPng" class="btn primary">Export PNG</button>
+  <button id="exportSvg" class="btn">Export SVG</button>
   <label>Search:</label>
   <input id="searchBox" type="text" placeholder="Filter by name...">
 </div>
 <div id="legend"></div>
 <div id="tooltip"><div class="tname"></div><div class="tdetail"></div></div>
+<div id="panel">
+  <div class="phead"><h3>Node details</h3><button id="panelClose" class="pclose" title="Close">&times;</button></div>
+  <div class="pbody" id="panelBody"></div>
+</div>
 <div id="stats"></div>
 <canvas id="c"></canvas>
 <script>
@@ -50,11 +78,20 @@ const tooltip=document.getElementById('tooltip');
 const statsEl=document.getElementById('stats');
 const projectSel=document.getElementById('projectSel');
 const searchBox=document.getElementById('searchBox');
+const layoutSel=document.getElementById('layoutSel');
+const edgeLabelsChk=document.getElementById('edgeLabels');
+const exportPngBtn=document.getElementById('exportPng');
+const exportSvgBtn=document.getElementById('exportSvg');
+const panel=document.getElementById('panel');
+const panelBody=document.getElementById('panelBody');
+const panelClose=document.getElementById('panelClose');
 let nodes=[],edges=[],nodeMap={};
 let simNodes=[],searchHits=new Set();
 let camX=0,camY=0,camZoom=1;
 let dragNode=null,isPanning=false,panStart={x:0,y:0};
 let hoveredNode=null;
+let selectedNode=null;
+let currentProject='';
 let W,H;
 function resize(){W=window.innerWidth;H=window.innerHeight;canvas.width=W;canvas.height=H}
 window.addEventListener('resize',resize);resize();
@@ -66,6 +103,59 @@ function buildLegend(labels){
     h+='<div class="leg-item"><div class="leg-dot" style="background:'+LABEL_COLORS[l]+'"></div>'+l+'</div>';
   });
   legendEl.innerHTML=h;
+}
+
+function applyLayout(layout){
+  if(simNodes.length===0)return;
+  if(layout==='sphere'){
+    const R=Math.min(W,H)*0.32;
+    const N=simNodes.length;
+    const phi=Math.PI*(3-Math.sqrt(5));
+    simNodes.forEach((n,i)=>{
+      const y=1-(i/(N-1||1))*2;
+      const r=Math.sqrt(Math.max(0,1-y*y));
+      const th=phi*i;
+      const sx=Math.cos(th)*r;
+      const sz=Math.sin(th)*r;
+      const depth=sz*R*0.5;
+      n.x=sx*R+camX;
+      n.y=-y*R+camY;
+      n.depth=depth;
+      n.vx=0;n.vy=0;
+    });
+  }else if(layout==='grid'){
+    const cols=Math.ceil(Math.sqrt(simNodes.length));
+    const cell=Math.min(W,H)*0.5/Math.max(1,cols);
+    const offX=(cols-1)*cell/2;
+    const offY=((Math.ceil(simNodes.length/cols))-1)*cell/2;
+    simNodes.forEach((n,i)=>{
+      const cx=i%cols, ry=Math.floor(i/cols);
+      n.x=(cx*cell-offX)+camX;
+      n.y=(-ry*cell+offY)+camY;
+      n.depth=0;
+      n.vx=0;n.vy=0;
+    });
+  }else{
+    simNodes.forEach((n,i)=>{
+      const angle=(i/simNodes.length)*Math.PI*2;
+      const r=Math.min(W,H)*0.3*Math.sqrt(simNodes.length/100);
+      n.x=Math.cos(angle)*r+(Math.random()-0.5)*60;
+      n.y=Math.sin(angle)*r+(Math.random()-0.5)*60;
+      n.depth=0;
+      n.vx=0;n.vy=0;
+    });
+  }
+  resetCamera();
+}
+
+function resetCamera(){
+  camX=0;camY=0;
+  let maxR=300;
+  simNodes.forEach(n=>{
+    const d=Math.hypot(n.x,n.y);
+    if(d>maxR)maxR=d;
+  });
+  camZoom=Math.max(0.2,Math.min(1.4,(Math.min(W,H)*0.45)/Math.max(maxR,1)));
 }
 
 function initSimulation(rawNodes,rawEdges){
@@ -80,17 +170,18 @@ function initSimulation(rawNodes,rawEdges){
     return{id:n.id,name:n.name,label:n.label,file:n.file||'',qualified:n.qualified||'',
       x:Math.cos(angle)*r+(Math.random()-0.5)*60,
       y:Math.sin(angle)*r+(Math.random()-0.5)*60,
-      vx:0,vy:0,r:n.label==='File'?7:n.label==='Class'?6:4.5};
+      depth:0,vx:0,vy:0,r:n.label==='File'?7:n.label==='Class'?6:4.5};
   });
   simNodes.forEach(n=>nodeMap[n.id]=n);
   const labels=[...new Set(nodes.map(n=>n.label))].sort();
   buildLegend(labels);
-  camX=0;camY=0;camZoom=1;
+  selectedNode=null;closePanel();
   statsEl.textContent=nodes.length+' nodes, '+edges.length+' edges';
+  applyLayout(layoutSel.value);
 }
 
 function simulate(){
-  if(simNodes.length===0)return;
+  if(simNodes.length===0||layoutSel.value!=='force')return;
   const N=simNodes.length;
   const k=Math.sqrt((W*H)/(N+1))*0.08;
   for(let i=0;i<N;i++){simNodes[i].vx*=0.85;simNodes[i].vy*=0.85}
@@ -136,6 +227,7 @@ function render(){
     ctx.fillStyle='#484f58';ctx.font='14px sans-serif';ctx.textAlign='center';
     ctx.fillText('Select a project to visualize',W/2,H/2);return;
   }
+  const showEdgeLabels=edgeLabelsChk.checked;
   ctx.save();
   edges.forEach(e=>{
     const a=nodeMap[e.src],b=nodeMap[e.dst];
@@ -143,21 +235,33 @@ function render(){
     const sa=worldToScreen(a.x,a.y),sb=worldToScreen(b.x,b.y);
     ctx.beginPath();ctx.moveTo(sa.x,sa.y);ctx.lineTo(sb.x,sb.y);
     const highlighted=hoveredNode&&(e.src===hoveredNode.id||e.dst===hoveredNode.id);
-    ctx.strokeStyle=highlighted?'#58a6ff33':'#30363d';ctx.lineWidth=highlighted?1.2:0.5;ctx.stroke();
+    const selected=selectedNode&&(e.src===selectedNode.id||e.dst===selectedNode.id);
+    const hl=highlighted||selected;
+    ctx.strokeStyle=hl?'#58a6ff66':'#30363d';ctx.lineWidth=hl?1.5:0.5;ctx.stroke();
+    if(showEdgeLabels&&camZoom>0.25){
+      const mx=(sa.x+sb.x)/2+8,my=(sa.y+sb.y)/2-4;
+      ctx.font='9px sans-serif';ctx.fillStyle='#8b949e';
+      ctx.textAlign='left';ctx.fillText(e.type,mx,my);
+    }
   });
   simNodes.forEach(n=>{
     const s=worldToScreen(n.x,n.y);
     if(s.x<-50||s.x>W+50||s.y<-50||s.y>H+50)return;
     const isHovered=hoveredNode&&hoveredNode.id===n.id;
+    const isSelected=selectedNode&&selectedNode.id===n.id;
     const isSearch=searchHits.has(n.id);
     const r=n.r*camZoom;
     if(isSearch){ctx.beginPath();ctx.arc(s.x,s.y,r+4,0,Math.PI*2);ctx.fillStyle='#e3b34144';ctx.fill()}
+    const dim=selectedNode&&!isSelected;
+    if(dim&&!isHovered)return;
     ctx.beginPath();ctx.arc(s.x,s.y,r,0,Math.PI*2);
-    ctx.fillStyle=isHovered?'#f0f6fc':LABEL_COLORS[n.label]||'#8b949e';
+    if(isSelected){ctx.fillStyle='#f0f6fc';}
+    else{ctx.fillStyle=LABEL_COLORS[n.label]||'#8b949e';}
     ctx.fill();
+    if(isSelected){ctx.beginPath();ctx.arc(s.x,s.y,r+3,0,Math.PI*2);ctx.strokeStyle='#f0f6fc';ctx.lineWidth=1.5;ctx.stroke()}
     if(camZoom>0.35&&r>2){
       const fontSize=Math.max(9,Math.min(12,10*camZoom));
-      ctx.font=fontSize+'px sans-serif';ctx.fillStyle=isHovered?'#f0f6fc':'#c9d1d9';
+      ctx.font=fontSize+'px sans-serif';ctx.fillStyle=isHovered||isSelected?'#f0f6fc':'#c9d1d9';
       ctx.textAlign='center';ctx.fillText(n.name,s.x,s.y-r-4);
     }
   });
@@ -170,6 +274,7 @@ render();
 
 function fetchAndLoad(project){
   if(!project)return;
+  currentProject=project;
   Promise.all([
     fetch('/api/nodes?project='+encodeURIComponent(project)).then(r=>r.json()),
     fetch('/api/edges?project='+encodeURIComponent(project)).then(r=>r.json())
@@ -187,6 +292,35 @@ fetch('/api/projects').then(r=>r.json()).then(projects=>{
 });
 projectSel.addEventListener('change',()=>fetchAndLoad(projectSel.value));
 
+layoutSel.addEventListener('change',()=>{if(simNodes.length)applyLayout(layoutSel.value)});
+
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtLines(n){return n!=null?String(n):'—'}
+function openPanel(data){
+  const nd=data.node;
+  let h='';
+  h+='<span class="pkind" style="background:'+(LABEL_COLORS[nd.label]||'#8b949e')+'">'+escapeHtml(nd.label)+'</span>';
+  h+='<div class="plabel">Name</div><div class="pval">'+escapeHtml(nd.name)+'</div>';
+  h+='<div class="plabel">Qualified name</div><div class="pval">'+escapeHtml(nd.qualified)+'</div>';
+  h+='<div class="plabel">File</div><div class="pval">'+escapeHtml(nd.file)+'</div>';
+  h+='<div class="plabel">Line range</div><div class="pval">'+fmtLines(nd.start_line)+'–'+fmtLines(nd.end_line)+'</div>';
+  if(nd.signature){h+='<div class="plabel">Signature</div><div class="pval">'+escapeHtml(nd.signature)+'</div>'}
+  if(nd.doc){h+='<div class="plabel">Doc</div><div class="pval">'+escapeHtml(nd.doc)+'</div>'}
+  h+='<div class="plabel">Edges ('+data.edges.length+')</div>';
+  data.edges.forEach(e=>{
+    const dir=e.direction==='in'?'←':'→';
+    h+='<div class="pval" style="font-size:11px;margin:3px 0">'
+      +escapeHtml(e.type)+' '+dir+' '+escapeHtml(e.neighbor_name)
+      +' <span style="color:#8b949e">('+escapeHtml(e.neighbor_label)+')</span></div>';
+  });
+  panelBody.innerHTML=h;
+  panel.classList.add('open');
+}
+function closePanel(){panel.classList.remove('open')}
+panelClose.addEventListener('click',()=>{selectedNode=null;closePanel()});
+
 searchBox.addEventListener('input',()=>{
   const q=searchBox.value.toLowerCase().trim();
   searchHits.clear();
@@ -195,6 +329,7 @@ searchBox.addEventListener('input',()=>{
 });
 
 canvas.addEventListener('mousedown',e=>{
+  if(panel.classList.contains('open')&&e.clientX>W-340)return;
   const w=screenToWorld(e.clientX,e.clientY);
   let closest=null,minDist=20/camZoom;
   simNodes.forEach(n=>{
@@ -226,7 +361,24 @@ canvas.addEventListener('mousemove',e=>{
     canvas.style.cursor='pointer';
   }else{tooltip.style.display='none';canvas.style.cursor='grab'}
 });
-canvas.addEventListener('mouseup',()=>{dragNode=null;isPanning=false});
+let clickStart=null,moved=false;
+canvas.addEventListener('mousedown',()=>{clickStart={x:event.x,y:event.y};moved=false});
+canvas.addEventListener('mousemove',()=>{
+  if(clickStart&&(Math.abs(event.x-clickStart.x)>3||Math.abs(event.y-clickStart.y)>3))moved=true;
+});
+canvas.addEventListener('mouseup',()=>{
+  dragNode=null;isPanning=false;
+  if(clickStart&&!moved){
+    const w=screenToWorld(event.clientX,event.clientY);
+    let closest=null,minDist=20/camZoom;
+    simNodes.forEach(n=>{
+      const d=Math.sqrt((n.x-w.x)**2+(n.y-w.y)**2);
+      if(d<minDist){minDist=d;closest=n}
+    });
+    if(closest)selectNode(closest.id);
+  }
+  clickStart=null;moved=false;
+});
 canvas.addEventListener('mouseleave',()=>{tooltip.style.display='none'});
 canvas.addEventListener('wheel',e=>{
   e.preventDefault();
@@ -234,6 +386,58 @@ canvas.addEventListener('wheel',e=>{
   camZoom*=factor;camZoom=Math.max(0.05,Math.min(10,camZoom));
 },{passive:false});
 canvas.style.cursor='grab';
+
+function selectNode(id){
+  const n=nodeMap[id];
+  if(!n)return;
+  selectedNode=n;
+  fetch('/api/projects/'+encodeURIComponent(currentProject)+'/nodes/'+id)
+    .then(r=>{if(!r.ok)throw new Error('fetch failed');return r.json()})
+    .then(data=>openPanel(data))
+    .catch(err=>{console.error(err);selectedNode=null});
+}
+
+canvas.addEventListener('dblclick',()=>{});
+
+function downloadDataURL(dataUrl,filename){
+  const a=document.createElement('a');
+  a.href=dataUrl;a.download=filename;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+
+exportPngBtn.addEventListener('click',()=>{
+  const link=canvas.toDataURL('image/png');
+  downloadDataURL(link,'graph-'+(currentProject||'project')+'.png');
+});
+
+exportSvgBtn.addEventListener('click',()=>{
+  let svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'">';
+  svg+='<rect width="'+W+'" height="'+H+'" fill="#0d1117"/>';
+  const seen=new Set();
+  edges.forEach(e=>{
+    const a=nodeMap[e.src],b=nodeMap[e.dst];
+    if(!a||!b)return;
+    const sa=worldToScreen(a.x,a.y),sb=worldToScreen(b.x,b.y);
+    svg+='<line x1="'+sa.x.toFixed(1)+'" y1="'+sa.y.toFixed(1)+'" x2="'+sb.x.toFixed(1)+'" y2="'+sb.y.toFixed(1)+'" stroke="#30363d" stroke-width="0.6"/>';
+    const mx=(sa.x+sb.x)/2+8,my=(sa.y+sb.y)/2-4;
+    svg+='<text x="'+mx.toFixed(1)+'" y="'+my.toFixed(1)+'" font-size="9" fill="#8b949e">'+escapeXml(e.type)+'</text>';
+    seen.add(e.type);
+  });
+  simNodes.forEach(n=>{
+    const s=worldToScreen(n.x,n.y);
+    const r=n.r;
+    svg+='<circle cx="'+s.x.toFixed(1)+'" cy="'+s.y.toFixed(1)+'" r="'+r+'" fill="'+(LABEL_COLORS[n.label]||'#8b949e')+'"/>';
+    if(r>2){
+      svg+='<text x="'+s.x.toFixed(1)+'" y="'+(s.y-r-4).toFixed(1)+'" font-size="10" fill="#c9d1d9" text-anchor="middle">'+escapeXml(n.name)+'</text>';
+    }
+  });
+  svg+='</svg>';
+  const blob=new Blob([svg],{type:'image/svg+xml'});
+  const url=URL.createObjectURL(blob);
+  downloadDataURL(url,'graph-'+(currentProject||'project')+'.svg');
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+function escapeXml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 })();
 </script>
 </body>
@@ -319,6 +523,42 @@ export function createGraphServer(store: Store): http.Server {
             site_line: e.site_line,
           }));
         return jsonResponse(res, edges);
+      }
+
+      const projNodeMatch = pathname.match(
+        /^\/api\/projects\/([^/]+)\/nodes\/(\d+)$/,
+      );
+      if (req.method === 'GET' && projNodeMatch) {
+        const project = decodeURIComponent(projNodeMatch[1]);
+        const id = Number(projNodeMatch[2]);
+        const node = store.getNodeById(id);
+        if (!node) return notFound(res, 'node not found');
+        const neighbors = new Map<number, Record<string, any>>();
+        store.getNodesByProject(project).forEach((n) => neighbors.set(n.id, n));
+        const edges = store
+          .getEdgesByProject(project)
+          .filter(
+            (e) =>
+              (e.src === id || e.dst === id) &&
+              e.src != null &&
+              e.dst != null,
+          )
+          .map((e) => {
+            const outgoing = e.src === id;
+            const nid = outgoing ? e.dst : e.src;
+            return {
+              src: e.src,
+              dst: e.dst,
+              type: e.type,
+              confidence: e.confidence,
+              site_line: e.site_line,
+              direction: outgoing ? 'out' : 'in',
+              neighbor_id: nid,
+              neighbor_name: neighbors.get(nid)?.name ?? null,
+              neighbor_label: neighbors.get(nid)?.label ?? null,
+            };
+          });
+        return jsonResponse(res, { node, edges });
       }
 
       const nodeMatch = pathname.match(/^\/api\/node\/(\d+)$/);

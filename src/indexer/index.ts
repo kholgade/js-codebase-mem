@@ -1,5 +1,5 @@
-import { readFile, readdir } from 'node:fs/promises';
-import { basename, extname, join, relative, resolve } from 'node:path';
+import { readFile, readdir, access } from 'node:fs/promises';
+import { basename, extname, join, relative, resolve, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { LanguageRegistry, LanguagePlugin, FileContext, Emit } from '../languages/contract.ts';
 import { emitsFromQuery } from '../languages/base.ts';
@@ -29,8 +29,129 @@ export interface IndexResult {
 const DEFAULT_IGNORE = new Set([
   'node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'target', 'out', 'venv', '.venv',
   '__pycache__', '.next', '.nuxt', '.cache', 'bin', 'obj', '.gradle', '.idea', '.vscode',
-  '.gitignore', 'coverage', '.tox', '.mypy_cache', '.pytest_cache', 'vendor', '.terraform',
+  'coverage', '.tox', '.mypy_cache', '.pytest_cache', 'vendor', '.terraform',
 ]);
+
+// Gitignore pattern types
+interface GitignorePattern {
+  pattern: string;
+  isNegation: boolean;
+  isDirOnly: boolean;
+  regex: RegExp;
+}
+
+// Parse a .gitignore file into regex patterns
+function parseGitignorePatterns(content: string): GitignorePattern[] {
+  const patterns: GitignorePattern[] = [];
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Skip empty lines and comments
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    let pattern = trimmed;
+    let isNegation = false;
+    let isDirOnly = false;
+
+    // Handle negation
+    if (pattern.startsWith('!')) {
+      isNegation = true;
+      pattern = pattern.slice(1);
+    }
+
+    // Handle directory-only patterns (trailing /)
+    if (pattern.endsWith('/')) {
+      isDirOnly = true;
+      pattern = pattern.slice(0, -1);
+    }
+
+    // Convert gitignore pattern to regex
+    const regex = gitignoreToRegex(pattern);
+    patterns.push({ pattern: trimmed, isNegation, isDirOnly, regex });
+  }
+
+  return patterns;
+}
+
+// Convert a single gitignore pattern to a RegExp
+function gitignoreToRegex(pattern: string): RegExp {
+  // Escape special regex characters except * and ?
+  let regexStr = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\//g, '/'); // Keep forward slashes
+
+  // Handle ** (matches any number of directories)
+  regexStr = regexStr.replace(/\*\*/g, '{{DOUBLE_STAR}}');
+
+  // Handle single * (matches anything except /)
+  regexStr = regexStr.replace(/\*/g, '[^/]*');
+
+  // Restore ** as a special token
+  regexStr = regexStr.replace(/\{\{DOUBLE_STAR\}\}/g, '.*');
+
+  // Handle ? (matches any single character except /)
+  regexStr = regexStr.replace(/\?/g, '[^/]');
+
+  // Anchor the pattern
+  if (!regexStr.startsWith('^')) {
+    // If pattern contains /, it's relative to the .gitignore location
+    if (pattern.includes('/')) {
+      regexStr = '^' + regexStr;
+    } else {
+      // Otherwise match anywhere in the path
+      regexStr = '(^|/)' + regexStr;
+    }
+  }
+
+  regexStr += '(/.*)?$';
+
+  return new RegExp(regexStr, 'i');
+}
+
+// Check if a path matches any gitignore patterns
+function matchesGitignore(
+  relPath: string,
+  isDir: boolean,
+  patterns: GitignorePattern[],
+): boolean {
+  let ignored = false;
+
+  for (const p of patterns) {
+    // Skip directory-only patterns for files
+    if (p.isDirOnly && !isDir) continue;
+
+    if (p.regex.test(relPath)) {
+      ignored = !p.isNegation;
+    }
+  }
+
+  return ignored;
+}
+
+// Load .gitignore patterns from a directory
+async function loadGitignorePatterns(dir: string): Promise<GitignorePattern[]> {
+  const patterns: GitignorePattern[] = [];
+  const gitignorePath = join(dir, '.gitignore');
+
+  try {
+    const content = await readFile(gitignorePath, 'utf8');
+    patterns.push(...parseGitignorePatterns(content));
+  } catch {
+    // No .gitignore file, that's fine
+  }
+
+  // Also check .cbm-ignore
+  const cbmIgnorePath = join(dir, '.cbm-ignore');
+  try {
+    const content = await readFile(cbmIgnorePath, 'utf8');
+    patterns.push(...parseGitignorePatterns(content));
+  } catch {
+    // No .cbm-ignore file, that's fine
+  }
+
+  return patterns;
+}
 
 type ParsedFile = {
   plugin: LanguagePlugin;
@@ -199,6 +320,17 @@ function writeFileGraph(
       );
       insertEdge(fileNodeId, id, 'HANDLES', 'exact', e.range.start.line + 1);
       nodes++;
+      // Link the route to its handler function (if the handler is a local symbol).
+      if (e.handler) {
+        const handlerQual = localNameToQualified.get(e.handler);
+        const handlerId = handlerQual ? symbolToId.get(handlerQual) : undefined;
+        if (handlerId) {
+          insertEdge(id, handlerId, 'CALLS', 'exact', e.range.start.line + 1);
+        } else if (e.handler.includes('.')) {
+          // Cross-module handler reference (e.g. controllers.user.get) — reference edge.
+          insertEdge(id, null, 'CALL_REFERENCE', 'reference', e.range.start.line + 1);
+        }
+      }
     }
   }
 
@@ -230,12 +362,18 @@ async function extract(
   const parser = await pool.parserFor(plugin, file);
   const tree = parser.parse(src);
   if (!tree) return [];
-  let q = queryCache.get(plugin.id);
+
+  // Determine the query to use based on file extension
+  const ext = extname(file);
+  const queryPath = plugin.queryByExt?.[ext] ?? plugin.query;
+  const cacheKey = `${plugin.id}:${ext}`;
+
+  let q = queryCache.get(cacheKey);
   if (!q) {
     // load query source from plugin.query file
-    const querySrc = await readFile(new URL(plugin.query, import.meta.url), 'utf8');
+    const querySrc = await readFile(new URL(queryPath, import.meta.url), 'utf8');
     q = new Query(parser.language!, querySrc);
-    queryCache.set(plugin.id, q);
+    queryCache.set(cacheKey, q);
   }
   const matches = q.matches(tree.rootNode);
   return emitsFromQuery(matches);
@@ -263,19 +401,41 @@ function markIndexed(store: Store, project: string, rel: string, hash: string, l
   store.upsertFile({ path: rel, project, lang: langId, hash, mtime: Date.now(), indexedAt: Date.now() });
 }
 
-export async function walk(dir: string, ignore: Set<string>, out: string[]): Promise<void> {
+export async function walk(
+  dir: string,
+  ignore: Set<string>,
+  out: string[],
+  rootDir?: string,
+  parentPatterns: GitignorePattern[] = [],
+): Promise<void> {
+  const currentRoot = rootDir ?? dir;
+
+  // Load .gitignore and .cbm-ignore patterns from current directory
+  const localPatterns = await loadGitignorePatterns(dir);
+  const allPatterns = [...parentPatterns, ...localPatterns];
+
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
     return;
   }
+
   for (const ent of entries) {
+    // Check hardcoded ignore list first
+    if (ignore.has(ent.name)) continue;
+
+    // Compute relative path from root for pattern matching
+    const fullPath = join(dir, ent.name);
+    const relPath = relative(currentRoot, fullPath);
+
+    // Check gitignore patterns
+    if (matchesGitignore(relPath, ent.isDirectory(), allPatterns)) continue;
+
     if (ent.isDirectory()) {
-      if (ignore.has(ent.name)) continue;
-      await walk(join(dir, ent.name), ignore, out);
+      await walk(fullPath, ignore, out, currentRoot, allPatterns);
     } else if (ent.isFile()) {
-      out.push(join(dir, ent.name));
+      out.push(fullPath);
     }
   }
 }
@@ -290,3 +450,11 @@ const SUPPORTED = new Set([
 export function isSupportedFile(path: string): boolean {
   return SUPPORTED.has(extname(path));
 }
+
+// Export for testing and external use
+export {
+  parseGitignorePatterns,
+  matchesGitignore,
+  loadGitignorePatterns,
+  type GitignorePattern,
+};

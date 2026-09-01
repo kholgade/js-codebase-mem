@@ -27,6 +27,14 @@
     "web-tree-sitter": "^0.26.13",
     "zod": "^4.5.4"
   },
+  "peerDependencies": {
+    "@huggingface/transformers": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/transformers": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tree-sitter-c-sharp": "^0.23.5",

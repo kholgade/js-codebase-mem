@@ -7,6 +7,8 @@ export interface LanguageDef {
   extensions: string[];
   /** optional per-extension wasm override (e.g. tsx for .tsx) */
   wasmByExt?: Record<string, string>;
+  /** optional per-extension query override (e.g. c.scm for .c files) */
+  queryByExt?: Record<string, string>;
   /** optional resolver (deep type resolution) */
   resolver?: Resolver;
   /** override contextualization */
@@ -38,6 +40,7 @@ export function buildLanguage(def: LanguageDef): LanguagePlugin {
   const resolver: Resolver = def.resolver ?? passthrough;
   const defaultWasm = `${def.id}.wasm`;
   const wasmByExt = def.wasmByExt ?? {};
+  const queryByExt = def.queryByExt ?? {};
   return {
     id: def.id,
     extensions: def.extensions,
@@ -45,6 +48,9 @@ export function buildLanguage(def: LanguageDef): LanguagePlugin {
     query: grammarPath(`${def.id}.scm`),
     wasmByExt: Object.fromEntries(
       Object.entries(wasmByExt).map(([ext, name]) => [ext, grammarPath(name)]),
+    ),
+    queryByExt: Object.fromEntries(
+      Object.entries(queryByExt).map(([ext, name]) => [ext, grammarPath(name)]),
     ),
     contextualize: def.contextualize ?? defaultContextualize,
     resolver,

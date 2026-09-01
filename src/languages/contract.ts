@@ -42,6 +42,8 @@ export interface LanguagePlugin {
   readonly wasmPath: string;
   /** optional per-extension wasm override (e.g. tsx for .tsx) */
   readonly wasmByExt?: Record<string, string>;
+  /** optional per-extension query override (e.g. c.scm for .c files) */
+  readonly queryByExt?: Record<string, string>;
   /** tree-sitter .scm query source mapping AST node kinds -> captures. */
   readonly query: string;
   /** Attribute emitted facts (qualified names, module/package scope). */

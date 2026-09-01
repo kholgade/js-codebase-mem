@@ -27,3 +27,11 @@
 (call_expression
   function: (selector_expression
     field: (field_identifier) @call.target))
+
+; HTTP routes — net/http http.HandleFunc("/path", handler)
+(call_expression
+  function: (selector_expression
+    field: (field_identifier) @route.method)
+  arguments: (argument_list
+    (interpreted_string_literal) @route.path
+    (identifier) @route.handler))

@@ -50,3 +50,12 @@
 (call_expression
   function: (member_expression
     property: (property_identifier) @call.target))
+
+; HTTP routes — Express-style router.get('/path', handler)
+(call_expression
+  function: (member_expression
+    object: (_) @route.app
+    property: (property_identifier) @route.method)
+  arguments: (arguments
+    (string (string_fragment) @route.path)
+    (_) @route.handler))

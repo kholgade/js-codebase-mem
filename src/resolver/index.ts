@@ -1,0 +1,11 @@
+export { buildScope, resolveByIdentifier, composeResolvers } from './interface.ts';
+export type { Resolver, Resolved, ResolutionScope, SyntaxNodeLike, FileContext } from './interface.ts';
+export { Scope, buildScopeTree } from './scope.ts';
+export type { ScopeEntry, LexicalScope } from './scope.ts';
+export { createJsTsResolver } from './js-ts.ts';
+export { createPythonResolver } from './python.ts';
+export { createJavaResolver } from './java.ts';
+export { createGoResolver } from './go.ts';
+export { createRustResolver } from './rust.ts';
+export { createCppResolver } from './cpp.ts';
+export { createCSharpResolver } from './csharp.ts';

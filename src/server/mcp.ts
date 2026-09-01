@@ -16,8 +16,9 @@ import {
   getGraphSchema,
   indexStatus,
 } from '../query/tools.ts';
-import { semanticQuery, buildIndex } from '../search/service.ts';
+import { semanticQuery, buildIndex, buildIndexAsync } from '../search/service.ts';
 import { listAdr, getAdr, updateAdr } from '../query/adr.ts';
+import { applyTraceConfidence } from '../query/traces.ts';
 
 const DB_PATH = process.env.CBM_CACHE_DIR
   ? `${process.env.CBM_CACHE_DIR}/graphs.db`
@@ -244,11 +245,15 @@ export function createServer(): McpServer {
   server.tool(
     'semantic_query',
     'Semantic search over the knowledge graph. Run build_index for the project first to populate embeddings.',
-    { project: z.string(), query: z.string(), limit: z.number().optional() },
+    { project: z.string(), query: z.string(), limit: z.number().optional(), signals: z.boolean().optional(), vec_weight: z.number().optional(), fts_weight: z.number().optional() },
     async (args) => {
       const store = new Store(DB_PATH);
       try {
-        const result = semanticQuery(store, args.project, args.query, args.limit ?? 10);
+        const result = semanticQuery(store, args.project, args.query, args.limit ?? 10, {
+          signals: args.signals,
+          vecWeight: args.vec_weight,
+          ftsWeight: args.fts_weight,
+        });
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } finally {
         store.close();
@@ -260,10 +265,14 @@ export function createServer(): McpServer {
   server.tool(
     'build_index',
     'Populate the FTS and semantic (embedding) index for a project',
-    { project: z.string() },
+    { project: z.string(), use_model: z.boolean().optional() },
     async (args) => {
       const store = new Store(DB_PATH);
       try {
+        if (args.use_model) {
+          const result = await buildIndexAsync(store, args.project);
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
         const result = buildIndex(store, args.project);
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } finally {
@@ -299,15 +308,26 @@ export function createServer(): McpServer {
     },
   );
 
-  // 15. ingest_traces (stub)
+  // 15. ingest_traces
   server.tool(
     'ingest_traces',
-    'Ingest execution traces (stub)',
-    { project: z.string(), traces: z.array(z.any()).optional() },
+    'Persist execution traces (ordered lists of function qualified names) and optionally boost CALLS edge confidence from them',
+    { project: z.string(), traces: z.array(z.object({ name: z.string().optional(), calls: z.array(z.string()) })).optional(), boost: z.boolean().optional() },
     async (args) => {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ ingested: (args.traces ?? []).length }) }],
-      };
+      const store = new Store(DB_PATH);
+      try {
+        const traces = args.traces ?? [];
+        for (const t of traces) {
+          store.ingestTrace(args.project, t);
+        }
+        if (args.boost !== false && traces.length > 0) {
+          const applied = applyTraceConfidence(store, args.project);
+          return { content: [{ type: 'text', text: JSON.stringify({ ingested: traces.length, ...applied }) }] };
+        }
+        return { content: [{ type: 'text', text: JSON.stringify({ ingested: traces.length }) }] };
+      } finally {
+        store.close();
+      }
     },
   );
 

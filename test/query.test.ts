@@ -146,6 +146,65 @@ test('queryGraph with WHERE', () => {
   }
 });
 
+test('queryGraph supports aggregation (COUNT)', () => {
+  const { store } = makeStore();
+  try {
+    seedGraph(store);
+    const result = queryGraph(store, 'test-proj', "MATCH (a:Function) RETURN COUNT(*) AS total");
+    assert.equal(result.length, 1);
+    assert.equal(Number(result[0].total), 3);
+  } finally {
+    store.close();
+  }
+});
+
+test('queryGraph supports COUNT of a property', () => {
+  const { store } = makeStore();
+  try {
+    seedGraph(store);
+    const result = queryGraph(store, 'test-proj', "MATCH (a:Class) RETURN COUNT(a.name) AS nclasses");
+    assert.equal(result.length, 1);
+    assert.equal(Number(result[0].nclasses), 1);
+  } finally {
+    store.close();
+  }
+});
+
+test('queryGraph supports OPTIONAL MATCH (LEFT JOIN)', () => {
+  const { store } = makeStore();
+  try {
+    seedGraph(store);
+    // main has 2 outgoing calls; OPTIONAL MATCH keeps main even if no matching target.
+    const result = queryGraph(
+      store,
+      'test-proj',
+      "OPTIONAL MATCH (a:Function)-[:CALLS]->(b:Class) WHERE a.name = 'helper' RETURN a.name",
+    );
+    assert.ok(result.length >= 1);
+    assert.equal(result[0].name, 'helper');
+  } finally {
+    store.close();
+  }
+});
+
+test('queryGraph supports variable-length CALLS path *1..2', () => {
+  const { store } = makeStore();
+  try {
+    seedGraph(store);
+    // main ->CALLS-> helper ->CALLS-> util; depth 2 reaches util from main.
+    const result = queryGraph(
+      store,
+      'test-proj',
+      "MATCH (a:Function)-[:CALLS*1..2]->(b:Function) WHERE a.name = 'main' RETURN b.name",
+    );
+    const names = result.map((r) => r.name);
+    assert.ok(names.includes('helper'), `expected helper in ${names}`);
+    assert.ok(names.includes('util'), `expected util in ${names}`);
+  } finally {
+    store.close();
+  }
+});
+
 test('getCodeSnippet returns node data', () => {
   const { store, dir } = makeStore();
   try {

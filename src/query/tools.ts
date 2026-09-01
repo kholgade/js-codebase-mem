@@ -158,140 +158,290 @@ export function traceCallPath(
   return hops;
 }
 
-// ─── 3. queryGraph (minimal openCypher subset) ───────────────────────────────
+// ─── 3. queryGraph (expanded openCypher subset) ──────────────────────────────
+
+interface CypherPattern {
+  alias: string;
+  label?: string;
+  edgeType?: string;
+  targetAlias: string;
+  targetLabel?: string;
+  optional?: boolean;
+  /** variable-length path e.g. *1..3 */
+  varLength?: { min?: number; max?: number };
+}
 
 interface CypherParseResult {
-  patterns: Array<{ alias: string; label?: string; edgeType?: string; targetAlias: string; targetLabel?: string; optional?: boolean }>;
+  patterns: CypherPattern[];
   wheres: Array<{ alias: string; prop: string; op: string; value: string }>;
   returns: string[];
+  /** node variable each RETURN column is sourced from (positionally aligned with `returns`) */
+  returnSrcs: Array<string | null>;
+  /** aggregation function applied to returned column, e.g. COUNT / COLLECT */
+  aggregations: Record<string, string>;
   limit?: number;
 }
 
 function parseCypher(query: string): CypherParseResult {
   const q = query.trim().replace(/;$/, '');
-  const result: CypherParseResult = { patterns: [], wheres: [], returns: [] };
+  const result: CypherParseResult = { patterns: [], wheres: [], returns: [], returnSrcs: [], aggregations: {} };
 
-  // Extract MATCH
-  const matchM = q.match(/MATCH\s+(.+)/i);
-  if (!matchM) throw new Error('Cypher: MATCH clause required');
-
-  const rest = matchM[1];
-
-  // Split on WHERE / RETURN / LIMIT
-  const whereM = rest.match(/\bWHERE\b\s+(.+?)(?=\bRETURN\b|\bLIMIT\b|$)/is);
-  const returnM = rest.match(/\bRETURN\b\s+(.+?)(?=\bLIMIT\b|$)/is);
-  const limitM = rest.match(/\bLIMIT\b\s+(\d+)/i);
-
-  if (returnM) {
-    result.returns = returnM[1].split(',').map(s => s.trim().replace(/^.*?\./, ''));
+  // Split into clauses in order. Support MATCH / OPTIONAL MATCH / WHERE / RETURN / LIMIT / UNWIND / WITH.
+  const clauses: Array<{ type: string; body: string }> = [];
+  const clauseRegex = /(OPTIONAL\s+MATCH|MATCH|UNWIND|WITH|WHERE|RETURN|LIMIT)\s+/gi;
+  let last: { type: string; rest: number } | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = clauseRegex.exec(q)) !== null) {
+    const type = m[1].toUpperCase().replace(/\s+/g, ' ').trim();
+    if (last) {
+      clauses.push({ type: last.type, body: q.slice(last.rest, m.index).trim() });
+    }
+    last = { type, rest: m.index + m[0].length };
   }
-  if (limitM) {
-    result.limit = parseInt(limitM[1], 10);
+  if (last) {
+    clauses.push({ type: last.type, body: q.slice(last.rest).trim() });
   }
-  if (whereM) {
-    const whereStr = whereM[1].replace(/\bRETURN\b.*$/is, '').trim();
-    const whereParts = whereStr.split(/\bAND\b/i);
+
+  // Identify MATCH types
+  const matchClauses = clauses.filter((c) => c.type === 'MATCH' || c.type === 'OPTIONAL MATCH');
+
+  // Parse each match clause's patterns
+  for (const mc of matchClauses) {
+    const isOptional = mc.type === 'OPTIONAL MATCH';
+    const patternStr = mc.body
+      .split(/\bWHERE\b/i)[0];
+    parsePatterns(patternStr, result, isOptional);
+  }
+
+  // WHERE
+  const whereClause = clauses.find((c) => c.type === 'WHERE');
+  if (whereClause) {
+    const whereParts = whereClause.body.split(/\bAND\b/i);
     for (const wp of whereParts) {
       const wm = wp.trim().match(/(\w+)\.(\w+)\s*(=|CONTAINS|STARTS\s*WITH|ENDS\s*WITH|LIKE)\s*'([^']*)'/i);
       if (wm) {
-        result.wheres.push({ alias: wm[1], prop: wm[2], op: wm[3].toUpperCase(), value: wm[4] });
+        result.wheres.push({ alias: wm[1], prop: wm[2], op: wm[3].toUpperCase().trim(), value: wm[4] });
       }
     }
   }
 
-  // Extract patterns: (a:Label)-[:EDGE]->(b:Label) or (a)-[:EDGE]->(b) or (a) [OPTIONAL (b:Label)]
-  const patternRegex = /\((\w+)(?::(\w+))?\)\s*(?:\[?\s*(?:OPTIONAL\s+)?(?:-\[:(\w+)\]->|\s*-\s*->)\s*\]?\s*)?\((\w+)(?::(\w+))?\)/gi;
-  let pm: RegExpExecArray | null;
-  while ((pm = patternRegex.exec(q)) !== null) {
-    const optional = /\bOPTIONAL\b/i.test(q.substring(Math.max(0, pm.index - 20), pm.index));
-    result.patterns.push({
-      alias: pm[1],
-      label: pm[2],
-      edgeType: pm[3],
-      targetAlias: pm[4],
-      targetLabel: pm[5],
-      optional,
-    });
-  }
-
-  // Also handle single-node MATCH: (a:Label) with no edge
-  if (result.patterns.length === 0) {
-    const singleM = q.match(/\((\w+)(?::(\w+))?\)/g);
-    if (singleM) {
-      for (const s of singleM) {
-        const sm = s.match(/\((\w+)(?::(\w+))?\)/);
-        if (sm && !result.patterns.find(p => p.alias === sm[1])) {
-          result.patterns.push({ alias: sm[1], label: sm[2], targetAlias: sm[1] });
+  // RETURN with aggregations
+  const returnClause = clauses.find((c) => c.type === 'RETURN');
+  if (returnClause) {
+    const retParts = returnClause.body.split(',').map((s) => s.trim());
+    for (const rp of retParts) {
+      // Match aggregation: COUNT(x.y), COUNT(*), COLLECT(x.y)
+      const aggM = rp.match(/^(COUNT|COLLECT|SUM|MIN|MAX)\s*\(\s*(?:\*|(\w+)\.(\w+)|\w+)\s*\)\s*(?:AS\s+(\w+))?$/i);
+      if (aggM) {
+        const fn = aggM[1].toUpperCase();
+        const isStar = rp.includes('(*)');
+        const prop = isStar ? '*' : (aggM[3] ?? aggM[2] ?? 'name');
+        const alias = aggM[4] ?? (isStar ? `${fn.toLowerCase()}_total` : `${aggM[3] ?? aggM[2]}`);
+        result.aggregations[alias] = `${fn}:${prop}`;
+        result.returns.push(alias);
+        result.returnSrcs.push(null);
+      } else {
+        // Node property with optional source variable, e.g. b.name or name
+        const srcM = rp.match(/^(\w+)\.(\w+)$/);
+        if (srcM) {
+          result.returnSrcs.push(srcM[1]);
+          result.returns.push(srcM[2]);
+        } else {
+          result.returnSrcs.push(null);
+          result.returns.push(rp.replace(/^.*?\./, ''));
         }
       }
     }
+  }
+
+  // LIMIT
+  const limitClause = clauses.find((c) => c.type === 'LIMIT');
+  if (limitClause) {
+    const lm = limitClause.body.match(/^\s*(\d+)/);
+    if (lm) result.limit = parseInt(lm[1], 10);
   }
 
   if (result.patterns.length === 0) throw new Error('Cypher: could not parse MATCH pattern');
   return result;
 }
 
+function parsePatterns(patternStr: string, result: CypherParseResult, isOptional: boolean): void {
+  // Full pattern with variable-length edges: (a)-[:EDGE*1..3]->(b:Label)
+  const varPatternRegex = /\((\w+)(?::(\w+))?\)\s*(?:-\[:(\w+)\*(\d+)\.\.(\d+)\]->\((\w+)(?::(\w+))?\)|-\[:(\w+)\*\]->\((\w+)(?::(\w+))?\))/gi;
+  let vm: RegExpExecArray | null;
+  let foundVar = false;
+  while ((vm = varPatternRegex.exec(patternStr)) !== null) {
+    foundVar = true;
+    // Two forms: with explicit range (groups 4,5) or bare * (groups 8..10)
+    const hasRange = vm[4] !== undefined;
+    result.patterns.push({
+      alias: vm[1],
+      label: vm[2],
+      edgeType: hasRange ? vm[3] : vm[8],
+      targetAlias: hasRange ? vm[6] : vm[9],
+      targetLabel: hasRange ? vm[7] : vm[10],
+      optional: isOptional,
+      varLength: hasRange ? { min: parseInt(vm[4], 10), max: parseInt(vm[5], 10) } : undefined,
+    });
+  }
+
+  // Regular two-node patterns: (a:Label)-[:EDGE]->(b:Label)
+  const patternRegex = /\((\w+)(?::(\w+))?\)\s*(?:\[?\s*(?:OPTIONAL\s+)?(?:-\[:(\w+)\]->|\s*-\s*->)\s*\]?\s*)?\((\w+)(?::(\w+))?\)/gi;
+  let pm: RegExpExecArray | null;
+  while ((pm = patternRegex.exec(patternStr)) !== null && !foundVar) {
+    result.patterns.push({
+      alias: pm[1],
+      label: pm[2],
+      edgeType: pm[3],
+      targetAlias: pm[4],
+      targetLabel: pm[5],
+      optional: isOptional || /\bOPTIONAL\b/i.test(patternStr.substring(Math.max(0, pm.index - 20), pm.index)),
+    });
+  }
+
+  // Single-node patterns: (a:Label)
+  if (!foundVar && result.patterns.length === 0) {
+    const singleM = patternStr.match(/\((\w+)(?::(\w+))?\)/g);
+    if (singleM) {
+      for (const s of singleM) {
+        const sm = s.match(/\((\w+)(?::(\w+))?\)/);
+        if (sm && !result.patterns.find((p) => p.alias === sm[1])) {
+          result.patterns.push({ alias: sm[1], label: sm[2], targetAlias: sm[1], optional: isOptional });
+        }
+      }
+    }
+  }
+}
+
+const AGG_FUNCTIONS: Record<string, string> = {
+  COUNT: 'COUNT',
+  COLLECT: 'GROUP_CONCAT', // approximate with GROUP_CONCAT (comma-joined)
+  SUM: 'SUM',
+  MIN: 'MIN',
+  MAX: 'MAX',
+};
+
 export function queryGraph(store: Store, project: string, cypher: string): Record<string, any>[] {
   const parsed = parseCypher(cypher);
-  const { patterns, wheres, returns, limit } = parsed;
+  const { patterns, wheres, returns, returnSrcs, limit, aggregations } = parsed;
+  const hasAgg = Object.keys(aggregations).length > 0;
   const requestedProps = returns.length > 0 ? returns : ['name', 'label'];
 
-  // Build SQL from patterns
+  // Build SQL from patterns. Join params precede condition params in the SQL text.
   const joins: string[] = [];
+  const joinParams: any[] = [];
   const conditions: string[] = ['n0.project = ?'];
-  const sqlParams: any[] = [project];
-  let paramIdx = 1;
+  const condParams: any[] = [project];
 
   // First pattern node
   const p0 = patterns[0];
   if (p0.label) {
     conditions.push(`n0.label = ?`);
-    sqlParams.push(p0.label);
+    condParams.push(p0.label);
   }
 
   // Process edges and target nodes
   for (let i = 0; i < patterns.length; i++) {
     const p = patterns[i];
     const nIdx = i + 1;
-    if (p.edgeType && p.alias !== p.targetAlias) {
-      joins.push(
-        `JOIN nodes n${nIdx} ON n${nIdx}.id = (SELECT ${p.optional ? 'e.dst' : 'e.dst'} FROM edges e WHERE e.src = n${i}.id AND e.type = ? AND e.project = ? LIMIT 1)`,
-      );
-      sqlParams.push(p.edgeType, project);
+    if (p.alias === p.targetAlias) continue;
+
+    // Variable-length path
+    if (p.varLength) {
+      const minDepth = p.varLength.min ?? 1;
+      const maxDepth = p.varLength.max ?? minDepth;
+      if (p.edgeType) {
+        joins.push(
+          `JOIN nodes n${nIdx} ON n${nIdx}.id IN (
+             WITH RECURSIVE reach(src, dst, depth) AS (
+               SELECT e.src, e.dst, 1 FROM edges e WHERE e.type = ? AND e.project = ? AND e.src = n${i}.id
+               UNION ALL
+               SELECT r.dst, e.dst, r.depth + 1 FROM reach r
+               JOIN edges e ON e.src = r.dst AND e.type = ? AND e.project = ?
+               WHERE r.depth < ?
+             )
+             SELECT dst FROM reach WHERE depth >= ? AND depth <= ?
+           )`,
+        );
+        joinParams.push(p.edgeType, project, p.edgeType, project, maxDepth, minDepth, maxDepth);
+      }
       if (p.targetLabel) {
+        // constraint on target node
         conditions.push(`n${nIdx}.label = ?`);
-        sqlParams.push(p.targetLabel);
+        condParams.push(p.targetLabel);
+      }
+      continue;
+    }
+
+    // Standard single edge (no var-length)
+    if (p.edgeType) {
+      const joinKind = p.optional ? 'LEFT JOIN' : 'JOIN';
+      const prefix = `n${nIdx}.id = (SELECT e.dst FROM edges e WHERE e.src = n${i}.id AND e.type = ? AND e.project = ? LIMIT 1)`;
+      if (p.targetLabel) {
+        if (p.optional) {
+          // Optional target label is part of the JOIN condition so NULL rows survive
+          joins.push(`${joinKind} nodes n${nIdx} ON ${prefix} AND n${nIdx}.label = ?`);
+          joinParams.push(p.edgeType, project, p.targetLabel);
+        } else {
+          joins.push(`${joinKind} nodes n${nIdx} ON ${prefix}`);
+          joinParams.push(p.edgeType, project);
+          conditions.push(`n${nIdx}.label = ?`);
+          condParams.push(p.targetLabel);
+        }
+      } else {
+        joins.push(`${joinKind} nodes n${nIdx} ON ${prefix}`);
+        joinParams.push(p.edgeType, project);
       }
     }
   }
 
   // WHERE conditions
   for (const w of wheres) {
-    // Find the alias index
-    const aliasIdx = patterns.findIndex(p => p.alias === w.alias);
+    const aliasIdx = patterns.findIndex((p) => p.alias === w.alias);
     const nIdx = aliasIdx >= 0 ? aliasIdx : 0;
     const col = w.prop === 'name' ? 'name' : w.prop === 'qualified' ? 'qualified' : w.prop === 'label' ? 'label' : w.prop;
     if (w.op === '=') {
       conditions.push(`n${nIdx}.${col} = ?`);
-      sqlParams.push(w.value);
+      condParams.push(w.value);
     } else if (w.op === 'LIKE' || w.op === 'CONTAINS') {
       conditions.push(`n${nIdx}.${col} LIKE ?`);
-      sqlParams.push(`%${w.value}%`);
+      condParams.push(`%${w.value}%`);
     } else if (w.op === 'STARTS WITH') {
       conditions.push(`n${nIdx}.${col} LIKE ?`);
-      sqlParams.push(`${w.value}%`);
+      condParams.push(`${w.value}%`);
     } else if (w.op === 'ENDS WITH') {
       conditions.push(`n${nIdx}.${col} LIKE ?`);
-      sqlParams.push(`%${w.value}`);
+      condParams.push(`%${w.value}`);
     }
   }
 
-  const selectCols = requestedProps.map((p, i) => `n0.${p} AS ${p}`).join(', ');
-  const sql = `SELECT DISTINCT ${selectCols} FROM nodes n0 ${joins.join(' ')} WHERE ${conditions.join(' AND ')} LIMIT ?`;
-  sqlParams.push(limit ?? 50);
+  // Map pattern source alias -> node table index (n0..nN)
+  const aliasIdx = new Map<string, number>();
+  patterns.forEach((p, i) => aliasIdx.set(p.alias, i));
+  patterns.forEach((p, i) => {
+    if (p.targetAlias !== p.alias) aliasIdx.set(p.targetAlias, i + 1);
+  });
+
+  const selectCols = requestedProps
+    .map((p, ri) => {
+      const agg = aggregations[p];
+      if (agg) {
+        const [fn, prop] = agg.split(':');
+        const target = prop === '*' ? '*' : `n0.${prop}`;
+        return `${AGG_FUNCTIONS[fn] ?? fn}(${target}) AS ${p}`;
+      }
+      const src = returnSrcs[ri];
+      const table = src !== null && aliasIdx.has(src) ? `n${aliasIdx.get(src)}` : 'n0';
+      return `${table}.${p} AS ${p}`;
+    })
+    .join(', ');
+
+  let sql = `SELECT ${hasAgg ? '' : 'DISTINCT '}${selectCols} FROM nodes n0 ${joins.join(' ')} WHERE ${conditions.join(' AND ')}`;
+  sql += ` LIMIT ?`;
+  const sqlParams = [...joinParams, ...condParams, limit ?? 50];
 
   const rows = store.queryNodes(sql, sqlParams);
-  return rows.map(r => {
+  return rows.map((r) => {
     const out: Record<string, any> = {};
     for (const p of requestedProps) {
       out[p] = r[p];

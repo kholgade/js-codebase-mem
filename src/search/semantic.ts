@@ -1,6 +1,8 @@
 import { Store } from '../sql/store.ts';
 import { normalizeIdent, splitIdentifier } from './tokenize.ts';
 import { searchFts } from './fts.ts';
+import { computeSignals, normalizeSignals, DEFAULT_SIGNAL_WEIGHTS } from './signals.ts';
+import type { SignalScores, SignalWeights } from './signals.ts';
 
 export const EMBEDDING_DIM = 256;
 
@@ -76,16 +78,31 @@ const TRANSFORMERS_MODELS = [
   '@xenova/transformers',
 ];
 
+// Default model: a well-supported small multilingual embedding model.
+// Override via CBM_EMBED_MODEL env var.
+const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
+
 export type AsyncEmbedFn = (text: string) => Promise<number[]>;
 
 async function tryLoadTransformers(): Promise<AsyncEmbedFn | null> {
   if (process.env.CBM_MODEL === 'off') return null;
+  const modelName = process.env.CBM_EMBED_MODEL ?? DEFAULT_MODEL;
   for (const pkg of TRANSFORMERS_MODELS) {
     try {
       const mod = await import(pkg);
+      let pipeline: any;
+      if (pkg.startsWith('@huggingface')) {
+        pipeline = mod.pipeline;
+      } else {
+        pipeline = mod.pipeline;
+      }
+      // Lazy singleton extractor (created once, reused).
+      let extractorPromise: Promise<any> | null = null;
       return async (text: string): Promise<number[]> => {
-        const { pipeline } = mod;
-        const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+        if (!extractorPromise) {
+          extractorPromise = pipeline('feature-extraction', modelName);
+        }
+        const extractor = await extractorPromise;
         const out = await extractor(normalizeIdent(text), { pooling: 'mean', normalize: true });
         return Array.from(out.data as Float32Array);
       };
@@ -207,6 +224,59 @@ export function buildEmbeddings(store: Store, project: string): BuildEmbeddingsR
   return { project, embedded, skipped };
 }
 
+/**
+ * Async variant of buildEmbeddings that can use a real model (Transformers.js).
+ * Falls back to the deterministic hashing embedder if no model is available.
+ */
+export async function buildEmbeddingsAsync(
+  store: Store,
+  project: string,
+  strategy: AsyncEmbedFn | null = null,
+): Promise<BuildEmbeddingsResult> {
+  const nodes = store.getNodesByProject(project);
+  let embedded = 0;
+  let skipped = 0;
+  const model = strategy ?? (await ensureModelStrategy());
+
+  const embedOne = async (node: Record<string, any>): Promise<number[]> => {
+    if (model) {
+      const vec = await model(embedNodeText(node));
+      return l2Normalize(vec);
+    }
+    return embedNode(node);
+  };
+
+  const db = store.underlying;
+  db.exec('BEGIN');
+  try {
+    const upsert = db.prepare(
+      `INSERT INTO node_embeddings (node_id, project, vec) VALUES (?, ?, ?)
+       ON CONFLICT(node_id) DO UPDATE SET vec = excluded.vec`,
+    );
+    db.prepare('DELETE FROM node_embeddings WHERE project = ?').run(project);
+    const map = new Map<number, number[]>();
+    for (const node of nodes) {
+      const label = String(node.label ?? '');
+      const name = String(node.name ?? '');
+      if (!EMBEDDABLE_LABELS.has(label) || !name.trim()) {
+        skipped++;
+        continue;
+      }
+      const vec = await embedOne(node);
+      const quant = quantizeToInt8(vec);
+      upsert.run(Number(node.id), project, Buffer.from(quant.buffer));
+      map.set(Number(node.id), vec);
+      embedded++;
+    }
+    db.exec('COMMIT');
+    embeddingCache.set(project, map);
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return { project, embedded, skipped };
+}
+
 export function loadEmbeddingCache(store: Store, project: string): Map<number, number[]> {
   const cached = embeddingCache.get(project);
   if (cached) return cached;
@@ -259,6 +329,9 @@ export interface SemanticSearchOptions {
   topK?: number;
   vecWeight?: number;
   ftsWeight?: number;
+  /** enable additional signals (tfidf, module proximity, signature, ast) */
+  signals?: boolean;
+  signalWeights?: Partial<SignalWeights>;
 }
 
 export function semanticSearch(
@@ -268,8 +341,9 @@ export function semanticSearch(
   limit = 10,
   opts: SemanticSearchOptions = {},
 ): SemanticHit[] {
-  const vecWeight = opts.vecWeight ?? 0.6;
-  const ftsWeight = opts.ftsWeight ?? 0.4;
+  const vecWeight = opts.vecWeight ?? 0.55;
+  const ftsWeight = opts.ftsWeight ?? 0.30;
+  const signalWeight = 1 - vecWeight - ftsWeight; // remaining for signals
   const topK = opts.topK ?? Math.max(limit * 10, 20);
 
   if (!hasEmbeddingsForProject(store, project)) {
@@ -306,11 +380,33 @@ export function semanticSearch(
     ftsScores = new Map();
   }
 
+  // Additional signals (optional, gated by opts.signals). Kept cheap.
+  let signalScores: Map<number, SignalScores> = new Map();
+  if (opts.signals) {
+    try {
+      const weights: SignalWeights = { ...DEFAULT_SIGNAL_WEIGHTS, ...(opts.signalWeights ?? {}) };
+      const result = computeSignals(store, project, query, weights);
+      normalizeSignals(result);
+      signalScores = result.perDoc;
+    } catch {
+      signalScores = new Map();
+    }
+  }
+
   const scored: Array<{ node_id: number; combinedScore: number }> = [];
   for (const [id, vec] of cache) {
     const vecScore = cosine(qvec, vec);
     const fts = ftsScores.get(id) ?? 0;
-    const combined = vecWeight * vecScore + ftsWeight * fts;
+    let combined = vecWeight * vecScore + ftsWeight * fts;
+    if (opts.signals && signalScores.has(id)) {
+      const sig = signalScores.get(id)!;
+      const sigSum =
+        DEFAULT_SIGNAL_WEIGHTS.tfidf * sig.tfidf +
+        DEFAULT_SIGNAL_WEIGHTS.moduleProximity * sig.moduleProximity +
+        DEFAULT_SIGNAL_WEIGHTS.signature * sig.signature +
+        DEFAULT_SIGNAL_WEIGHTS.astProfile * sig.astProfile;
+      combined += signalWeight * sigSum;
+    }
     scored.push({ node_id: id, combinedScore: combined });
   }
 
