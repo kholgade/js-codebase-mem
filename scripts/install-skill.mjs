@@ -32,6 +32,14 @@ if (!existsSync(cli)) {
   process.exit(1);
 }
 
+// Prefer the short `jcbm` command when available (npm link / install -g),
+// otherwise fall back to the full `node <abs>/dist/cli/index.js` path.
+const onPath = ['/usr/local/bin', '/opt/homebrew/bin', join(home, 'bin'), '/usr/bin'].some((p) =>
+  existsSync(join(p, 'jcbm')),
+);
+const serverCmd = onPath ? ['jcbm', 'serve'] : ['node', cli, 'serve'];
+const launch = serverCmd.join(' ');
+
 function copySkill(dest) {
   try {
     mkdirSync(dest, { recursive: true });
@@ -50,10 +58,10 @@ if (wantSkill) {
   console.log('');
 }
 
-const server = `node ${cli} mcp`;
-const snippet = `Launch command: ${server}`;
+const server = launch;
 console.log('─'.repeat(72));
-console.log('MCP server snippets (replace /ABSOLUTE/PATH with your repo root):');
+console.log('MCP server snippets (add the memory-graph server to each agent):');
+console.log(`Launch command: ${server}`);
 console.log('');
 
 console.log('## opencode  -> ~/.config/opencode/opencode.json  (mcp block)');
@@ -62,7 +70,7 @@ console.log(JSON.stringify(
     mcp: {
       'memory-graph': {
         type: 'local',
-        command: ['node', cli, 'mcp'],
+        command: serverCmd,
         enabled: true,
         environment: {},
       },
@@ -75,27 +83,26 @@ console.log('');
 
 console.log('## Claude Code -> ~/.claude/settings.json  (mcpServers block)');
 console.log(JSON.stringify({
-  mcpServers: { 'memory-graph': { command: 'node', args: [cli, 'mcp'] } },
+  mcpServers: { 'memory-graph': { command: serverCmd[0], args: serverCmd.slice(1) } },
 }, null, 2));
 console.log('');
 
 console.log('## OpenAI Codex -> ~/.codex/config.toml');
 console.log(`[mcp_servers."memory-graph"]
-command = "node"
-args = [${JSON.stringify(cli)}, "mcp"]
+command = ${JSON.stringify(serverCmd[0])}
+args = ${JSON.stringify(serverCmd.slice(1))}
 enabled = true
 startup_timeout_sec = 30
 `);
 console.log('## Kiro -> ~/.kiro/settings/mcp.json');
 console.log(JSON.stringify({
-  mcpServers: { 'memory-graph': { command: 'node', args: [cli, 'mcp'], disabled: false } },
+  mcpServers: { 'memory-graph': { command: serverCmd[0], args: serverCmd.slice(1), disabled: false } },
 }, null, 2));
 console.log('');
 
 console.log('## Factory Droid');
 console.log(`droid mcp add memory-graph --type stdio -- ${server}`);
 console.log('');
-console.log(snippet);
 
 if (wantOpenCodeMcp) {
   const cfgPath = join(home, '.config', 'opencode', 'opencode.json');
@@ -114,7 +121,7 @@ if (wantOpenCodeMcp) {
   if (cfg.mcp['memory-graph']) {
     console.log(`mcp["memory-graph"] already configured in ${cfgPath}`);
   } else {
-    cfg.mcp['memory-graph'] = { type: 'local', command: ['node', cli, 'mcp'], enabled: true, environment: {} };
+    cfg.mcp['memory-graph'] = { type: 'local', command: serverCmd, enabled: true, environment: {} };
     writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
     console.log(`Wrote mcp["memory-graph"] to ${cfgPath}`);
     console.log('Restart opencode for the change to take effect.');

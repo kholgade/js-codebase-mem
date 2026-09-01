@@ -18,25 +18,20 @@ Two parts are involved:
 
 ## Prerequisite
 
-The server entry point is the built CLI. From this repo:
+Build the CLI and expose the short `jcbm` command:
 
 ```bash
 npm install
-npm run build    # produces dist/cli/index.js
+npm run build    # produces dist/cli/index.js + makes it executable
+npm link         # optional: puts `jcbm` on your PATH
 ```
 
-The launch command for every config below is:
+Every MCP config below launches the server with `jcbm serve`. If you did not
+`npm link`, use `node /ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js serve`
+in place of `jcbm serve`.
 
-```
-node /ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js mcp
-```
-
-Replace `/ABSOLUTE/PATH/js-codebase-mem` with `pwd` output in this repo. The
-graph DB lives at `~/.cache/js-codebase-mem/graphs.db` (override with the
+The graph DB lives at `~/.cache/js-codebase-mem/graphs.db` (override with the
 `CBM_CACHE_DIR` env var if you want each agent to share or isolate data).
-
-Optionally publish the package, then every config below can use
-`npx -y js-codebase-mem mcp` instead of an absolute path.
 
 ## opencode
 
@@ -58,7 +53,7 @@ project's `opencode.json`):
   "mcp": {
     "memory-graph": {
       "type": "local",
-      "command": ["node", "/ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js", "mcp"],
+      "command": ["jcbm", "serve"],
       "enabled": true,
       "environment": {}
     }
@@ -84,8 +79,8 @@ MCP server — add to `~/.claude/settings.json` (user) or `.mcp.json` (project):
 {
   "mcpServers": {
     "memory-graph": {
-      "command": "node",
-      "args": ["/ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js", "mcp"]
+      "command": "jcbm",
+      "args": ["serve"]
     }
   }
 }
@@ -101,8 +96,8 @@ MCP server — in `~/.codex/config.toml` (user) or `.codex/config.toml`
 
 ```toml
 [mcp_servers.memory-graph]
-command = "node"
-args = ["/ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js", "mcp"]
+command = "jcbm"
+args = ["serve"]
 enabled = true
 startup_timeout_sec = 30
 # optional: forward your cache dir
@@ -112,7 +107,7 @@ startup_timeout_sec = 30
 or via the CLI:
 
 ```bash
-codex mcp add memory-graph -- node /ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js mcp
+codex mcp add memory-graph -- jcbm serve
 ```
 
 Skills are not first-class in Codex; encode the workflow by appending the body
@@ -122,15 +117,15 @@ of `skills/memory-graph/SKILL.md` (frontmatter stripped) to the repo's
 ## Kiro
 
 MCP server — in `~/.kiro/settings/mcp.json` (user) or `.kiro/settings/mcp.json`
-(workspace). Kiro does not inherit your shell PATH, so use absolute paths and
-explicit `env.PATH` for Node-based servers:
+(workspace). Kiro does not inherit your shell PATH, so use the absolute `node`
+executable and an explicit `env.PATH`:
 
 ```json
 {
   "mcpServers": {
     "memory-graph": {
       "command": "/path/to/node",
-      "args": ["/ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js", "mcp"],
+      "args": ["/ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js", "serve"],
       "env": {
         "PATH": "/opt/homebrew/opt/node@22/bin:/usr/local/bin:/usr/bin:/bin"
       },
@@ -150,8 +145,10 @@ save. For the agent guidance, drop the skill body into a steering file, e.g.
 Add the server from the CLI or the `/mcp` manager:
 
 ```bash
-droid mcp add memory-graph --type stdio -- node /ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js mcp
-# optional: droid mcp add memory-graph --type stdio --env CBM_CACHE_DIR=/path -- node ...
+droid mcp add memory-graph --type stdio -- jcbm serve
+# if jcbm is not on PATH, give the full node path:
+# droid mcp add memory-graph --type stdio -- node /ABSOLUTE/PATH/js-codebase-mem/dist/cli/index.js serve
+# optional: droid mcp add memory-graph --type stdio --env CBM_CACHE_DIR=/path -- jcbm serve
 ```
 
 Give a custom droid access via its frontmatter:
@@ -165,22 +162,22 @@ mcpServers: ["memory-graph"]
 ## Any other MCP client
 
 Standard `mcpServers`-style config (Claude Code / Kiro shape) or
-`droid`/`codex` CLI `add` all work the same: spawn
-`node <abs>/dist/cli/index.js mcp` over stdio. For clients without MCP, the CLI
-provides equivalent commands:
+`droid`/`codex` CLI `add` all work the same: spawn `jcbm serve` over stdio. For
+clients without MCP, the CLI provides equivalent commands:
 
 ```bash
-node dist/cli/index.js index <repo_path> --project <name>
-node dist/cli/index.js cli <project> graph --query "MATCH (a:Function) RETURN a.name LIMIT 5"
+jcbm index <repo_path> --project <name>
+jcbm cli get_architecture --project <name>
+jcbm cli query_graph --project <name> --query "MATCH (a:Function) RETURN a.name LIMIT 5"
 ```
 
-Run `node dist/cli/index.js --help` to list available commands.
+Run `jcbm --help` to list available commands.
 
 ## Verifying the wiring
 
 ```bash
 # 1. index once (needs the server running, or via CLI)
-node dist/cli/index.js index /path/to/some/repo --project demo
+jcbm index /path/to/some/repo --project demo
 # 2. then ask your agent:
 #    "using the memory-graph, what are the 5 most-called functions in project demo?"
 ```

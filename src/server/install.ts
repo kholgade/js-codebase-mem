@@ -25,6 +25,20 @@ export interface AutoInstallResult {
   skipped: string[];
 }
 
+/**
+ * Pick a short command to launch the MCP server, avoiding long absolute paths in
+ * agent configs. Prefers `jcbm` when it's on PATH (npm link / install -g),
+ * otherwise falls back to `node <abs>/dist/cli/index.js serve`.
+ */
+export function preferredLaunchCommand(argv1?: string): { command: string } {
+  const home = homedir();
+  const jcbmOnPath = ['/usr/local/bin', '/opt/homebrew/bin', join(home, 'bin'), '/usr/bin'].some((p) =>
+    existsSync(join(p, 'jcbm')),
+  );
+  if (jcbmOnPath) return { command: 'jcbm' };
+  return { command: argv1 ?? 'js-codebase-mem' };
+}
+
 interface Target {
   key: string;
   path: string;
@@ -49,7 +63,7 @@ function targets(): Target[] {
  * Detect installed coding agents by config-file existence and inject the
  * `js-codebase-mem` MCP server entry, merging non-destructively.
  */
-export async function autoInstall(cmdPath: string, options: { skipConfig?: boolean } = {}): Promise<AutoInstallResult> {
+export async function autoInstall(command: string, options: { skipConfig?: boolean } = {}): Promise<AutoInstallResult> {
   const result: AutoInstallResult = { wired: [], skipped: [] };
 
   for (const t of targets()) {
@@ -74,7 +88,7 @@ export async function autoInstall(cmdPath: string, options: { skipConfig?: boole
           result.skipped.push(t.key);
           continue;
         }
-        root[NAME] = { command: cmdPath, args: ['serve'] };
+        root[NAME] = { command, args: ['serve'] };
         writeFileSync(t.path, JSON.stringify(obj, null, 2) + '\n');
         result.wired.push(t.key);
       }
@@ -86,7 +100,7 @@ export async function autoInstall(cmdPath: string, options: { skipConfig?: boole
       try {
         let raw = readFileSync(t.path, 'utf8');
         if (!raw.includes(`${NAME}`)) {
-          raw += `\n# ${NAME}: MCP server entry (managed by js-codebase-mem install)\n# command = "${cmdPath}", args = ["serve"]\n`;
+          raw += `\n# ${NAME}: MCP server entry (managed by js-codebase-mem install)\n# command = "${command}", args = ["serve"]\n`;
           writeFileSync(t.path, raw);
         }
         result.wired.push(t.key);

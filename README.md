@@ -69,6 +69,7 @@ Kiro, Droid, and opencode can plug into straight away.
 ```bash
 npm install
 npm run build          # compiles the CLI, MCP server, and web UI
+npm link               # optional: exposes the short `jcbm` command on your PATH
 ```
 
 > Keep grammars fresh:
@@ -76,32 +77,37 @@ npm run build          # compiles the CLI, MCP server, and web UI
 
 ### Usage for humans (CLI)
 
+After `npm link`, everything is the short `jcbm` command — no long paths:
+
 ```bash
 # Index a repository once (fast, idempotent, incremental)
-node dist/cli/index.js index /path/to/repo --project team-service
+jcbm index /path/to/repo --project team-service
 
 # What does the project look like? (languages, packages, modules)
-node dist/cli/index.js cli get_architecture --project team-service
+jcbm cli get_architecture --project team-service
 
 # Find a symbol and get its exact source
-node dist/cli/index.js cli search_code --project team-service --pattern "getUser"
-node dist/cli/index.js cli get_code_snippet --project team-service --qualified-name "src/auth.getUser"
+jcbm cli search_code --project team-service --pattern "getUser"
+jcbm cli get_code_snippet --project team-service --qualified-name "src/auth.getUser"
 
 # Who calls a function? (its blast radius / impact)
-node dist/cli/index.js cli trace_path --project team-service --function-name getUser --direction inbound
+jcbm cli trace_path --project team-service --function-name getUser --direction inbound
 
 # "What breaks if I change a file?" — impact analysis, not a blind diff
-node dist/cli/index.js cli detect_changes --project team-service --repo-path /path/to/repo
+jcbm cli detect_changes --project team-service --repo-path /path/to/repo
 
 # Semantic search — "the thing that connects to the payment provider"
-node dist/cli/index.js cli build_index --project team-service       # one-time
-node dist/cli/index.js cli semantic_query --project team-service --query "payment integration"
+jcbm cli build_index --project team-service       # one-time
+jcbm cli semantic_query --project team-service --query "payment integration"
 ```
+
+(Without `npm link`, prefix each with `node dist/cli/index.js`, e.g.
+`node dist/cli/index.js index ...`.)
 
 ### Usage for browsers (web UI)
 
 ```bash
-node dist/cli/index.js serve-ui 4173
+jcbm serve-ui 4173
 # open http://localhost:4173 — browse the graph, click any node for its details,
 # follow edge labels, flip between layouts, and export a PNG/SVG of your architecture.
 ```
@@ -113,9 +119,10 @@ hand-wire:
 
 ```bash
 # Auto-detect installed agents (Claude Code, Cursor, Cline, VS Code, Codex,
-# OpenCode) and register js-codebase-mem as an MCP server in their config:
-node dist/cli/index.js install       # what got wired
-node dist/cli/index.js uninstall     # remove it again
+# OpenCode) and register js-codebase-mem as an MCP server in their config.
+# Prefers the short `jcbm serve` command when the bin is on PATH:
+jcbm install       # what got wired
+jcbm uninstall     # remove it again
 
 # Or copy the portable skill + print per-agent snippets for the rest
 # (opencode, Claude, Codex, Kiro, Droid):
@@ -134,8 +141,8 @@ frontmatter) live in **[docs/agent-integration.md](docs/agent-integration.md)**.
 ### Sharing the graph with your team
 
 ```bash
-node dist/cli/index.js export_artifact --project team-service --dest team-service.cbm
-node dist/cli/index.js import_artifact --src team-service.cbm --project team-service
+jcbm export_artifact --project team-service --dest team-service.cbm
+jcbm import_artifact --src team-service.cbm --project team-service
 ```
 
 Versioned, compressed artifacts can be diffed and merged — so an onboarding

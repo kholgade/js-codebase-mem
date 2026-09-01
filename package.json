@@ -8,14 +8,14 @@
     "node": ">=22.5.0"
   },
   "bin": {
-    "js-codebase-mem": "./dist/cli/index.js"
+    "jcbm": "./dist/cli/index.js"
   },
   "files": [
     "dist",
     "grammars"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/postbuild-cli.mjs",
     "build:grammars": "node scripts/build-grammars.mjs",
     "dev": "tsx watch src/cli/index.ts",
     "start": "node dist/cli/index.js",

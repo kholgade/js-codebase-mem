@@ -180,23 +180,24 @@ Ingest execution traces.
 
 ## CLI reference
 
-The CLI is `dist/cli/index.js` (bin name `js-codebase-mem`). Run `--help` for
-the usage summary, `--version` for `0.1.0`.
+The CLI is `jcbm` (bin name `jcbm`, source at `dist/cli/index.js`). Run `jcbm
+--help` for the usage summary, `jcbm --version` for `0.1.0`. If you didn't
+`npm link`, invoke via `node dist/cli/index.js <args>`.
 
 Invocation forms:
 
 ```
-js-codebase-mem index <repoPath> [--project <name>]
-js-codebase-mem watch <repoPath> [--project <name>] [--interval <ms>] [--json]
-js-codebase-mem daemon stop
-js-codebase-mem cli <tool> [flags]
-js-codebase-mem serve | mcp
-js-codebase-mem serve-ui | ui [port]
-js-codebase-mem install [--binary <path>]
-js-codebase-mem uninstall
-js-codebase-mem export_artifact --project <name> --dest <path>
-js-codebase-mem import_artifact --src <path> [--project override]
-js-codebase-mem --version | --help
+jcbm index <repoPath> [--project <name>]
+jcbm watch <repoPath> [--project <name>] [--interval <ms>] [--json]
+jcbm daemon stop
+jcbm cli <tool> [flags]
+jcbm serve | mcp
+jcbm serve-ui | ui [port]
+jcbm install [--binary <path>]
+jcbm uninstall
+jcbm export_artifact --project <name> --dest <path>
+jcbm import_artifact --src <path> [--project override]
+jcbm --version | --help
 ```
 
 ### Top-level commands

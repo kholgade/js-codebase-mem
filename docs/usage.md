@@ -14,7 +14,8 @@ CLI, or a web UI — with full-text and vector semantic search.
 
 ```bash
 npm install
-npm run build              # tsc → dist/
+npm run build              # tsc → dist/ (+ makes the CLI executable)
+npm link                   # optional: exposes the short `jcbm` command on PATH
 ```
 
 (Optional) regenerate/download grammar manifests:
@@ -22,6 +23,9 @@ npm run build              # tsc → dist/
 ```bash
 npm run build:grammars     # writes grammars/manifest.json
 ```
+
+The examples below use the `jcbm` command. If you didn't `npm link`, prefix
+every `jcbm` with `node dist/cli/index.js`.
 
 Development mode (watch + re-run):
 
@@ -32,7 +36,7 @@ npm run dev                # tsx watch src/cli/index.ts
 ## Index a project
 
 ```bash
-node dist/cli/index.js index /path/to/repo --project my-project
+jcbm index /path/to/repo --project my-project
 ```
 
 - `--project` defaults to the last path segment of the repo path if omitted.
@@ -50,7 +54,7 @@ The database is stored at:
 ## Watch and continuously re-index
 
 ```bash
-node dist/cli/index.js watch /path/to/repo --project my-project
+jcbm watch /path/to/repo --project my-project
 ```
 
 - Polls every 2 s (override with `--interval <ms>`) comparing file hashes; an
@@ -61,7 +65,7 @@ node dist/cli/index.js watch /path/to/repo --project my-project
 ## Run the MCP server
 
 ```bash
-node dist/cli/index.js serve      # also accepts: mcp
+jcbm serve      # also accepts: mcp
 ```
 
 This starts the MCP server on **stdio**, suitable for connecting an MCP client
@@ -70,8 +74,8 @@ This starts the MCP server on **stdio**, suitable for connecting an MCP client
 To wire it into an installed coding agent automatically:
 
 ```bash
-node dist/cli/index.js install        # detects config files and injects the server
-node dist/cli/index.js uninstall      # removes it
+jcbm install        # detects config files and injects the server
+jcbm uninstall      # removes it
 ```
 
 `install` scans `~/.claude.json`, VS Code `mcp.json`, Cursor `mcp.json`,
@@ -83,8 +87,8 @@ See [`api-reference.md`](api-reference.md) for the full list of MCP tools.
 ## Run the HTTP graph UI
 
 ```bash
-node dist/cli/index.js serve-ui       # or: ui; default port 9779
-node dist/cli/index.js serve-ui 9000  # custom port
+jcbm serve-ui       # or: ui; default port 9779
+jcbm serve-ui 9000  # custom port
 ```
 
 Opens a force-directed graph visualizer at `http://127.0.0.1:<port>` with:
@@ -109,15 +113,15 @@ JSON API endpoints (all `GET`, `Access-Control-Allow-Origin: *`):
 Run any query tool through `cli <tool>`:
 
 ```bash
-node dist/cli/index.js cli list_projects
-node dist/cli/index.js cli search_graph --project my-project --label Function --limit 20
-node dist/cli/index.js cli trace_path --project my-project --function-name handleRequest --direction both --depth 3
-node dist/cli/index.js cli query_graph --project my-project --query "MATCH (n:Function) RETURN n.name, n.qualified LIMIT 10"
-node dist/cli/index.js cli get_architecture --project my-project
-node dist/cli/index.js cli dead_code --project my-project
-node dist/cli/index.js cli get_code_snippet --project my-project --qualified-name auth.login
-node dist/cli/index.js cli detect_changes --project my-project --repo-path /path/to/repo
-node dist/cli/index.js cli get_graph_schema --project my-project
+jcbm cli list_projects
+jcbm cli search_graph --project my-project --label Function --limit 20
+jcbm cli trace_path --project my-project --function-name handleRequest --direction both --depth 3
+jcbm cli query_graph --project my-project --query "MATCH (n:Function) RETURN n.name, n.qualified LIMIT 10"
+jcbm cli get_architecture --project my-project
+jcbm cli dead_code --project my-project
+jcbm cli get_code_snippet --project my-project --qualified-name auth.login
+jcbm cli detect_changes --project my-project --repo-path /path/to/repo
+jcbm cli get_graph_schema --project my-project
 ```
 
 See [`query-language.md`](query-language.md) for the Cypher subset and
@@ -128,15 +132,15 @@ See [`query-language.md`](query-language.md) for the Cypher subset and
 Semantic search needs an embedding index, built per project:
 
 ```bash
-node dist/cli/index.js cli build_index --project my-project
+jcbm cli build_index --project my-project
 # or use the optional model:
-node dist/cli/index.js cli build_index --project my-project --use-model true
+jcbm cli build_index --project my-project --use-model true
 ```
 
 Then query:
 
 ```bash
-node dist/cli/index.js cli semantic_query --project my-project --query "database connection pooling" --limit 10
+jcbm cli semantic_query --project my-project --query "database connection pooling" --limit 10
 ```
 
 ### Optional model setup (`CBM_MODEL`, `CBM_EMBED_MODEL`)
@@ -164,9 +168,9 @@ node dist/cli/index.js cli semantic_query --project my-project --query "database
 The store can be snapshotted into a self-describing, compressed artifact.
 
 ```bash
-node dist/cli/index.js export_artifact --project my-project --dest graph.art.gz
-node dist/cli/index.js import_artifact --src graph.art.gz
-node dist/cli/index.js import_artifact --src graph.art.gz --project renamed-project
+jcbm export_artifact --project my-project --dest graph.art.gz
+jcbm import_artifact --src graph.art.gz
+jcbm import_artifact --src graph.art.gz --project renamed-project
 ```
 
 Artifact details (see `src/artifact.ts`):

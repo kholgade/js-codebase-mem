@@ -26,20 +26,20 @@ mkdirSync(CACHE_DIR, { recursive: true });
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
 const HELP = `
-js-codebase-mem - Node.js code intelligence engine (MCP + CLI)
+jcbm - js-codebase-mem: Node.js code intelligence engine (MCP + CLI)
 
 Usage:
-  js-codebase-mem index <repoPath> [--project <name>]
-  js-codebase-mem watch <repoPath> [--project <name>] [--interval <ms>] [--json]
-  js-codebase-mem daemon stop                 Stop the watch daemon
-  js-codebase-mem cli <tool> [flags]
-  js-codebase-mem install [--binary <path>]
-  js-codebase-mem uninstall
-  js-codebase-mem export_artifact --project <name> --dest <path.gz>
-  js-codebase-mem import_artifact --src <path.gz> [--project override]
-  js-codebase-mem serve                        Start MCP stdio server
-  js-codebase-mem --version
-  js-codebase-mem --help
+  jcbm index <repoPath> [--project <name>]
+  jcbm watch <repoPath> [--project <name>] [--interval <ms>] [--json]
+  jcbm daemon stop                 Stop the watch daemon
+  jcbm cli <tool> [flags]
+  jcbm install [--binary <path>]
+  jcbm uninstall
+  jcbm export_artifact --project <name> --dest <path.gz>
+  jcbm import_artifact --src <path.gz> [--project override]
+  jcbm serve                        Start MCP stdio server
+  jcbm --version
+  jcbm --help
 
 CLI tools:
   list_projects
@@ -119,10 +119,11 @@ async function main(argv: string[]): Promise<void> {
   }
 
   if (cmd === 'install') {
-    const { autoInstall } = await import('../server/install.ts');
+    const { autoInstall, preferredLaunchCommand } = await import('../server/install.ts');
     const args = parseArgs(rest);
-    const binary = args.binary ?? process.argv[1] ?? 'js-codebase-mem';
-    const result = await autoInstall(binary);
+    const explicit = args.binary;
+    const command = explicit ?? preferredLaunchCommand(process.argv[1]).command;
+    const result = await autoInstall(command, { skipConfig: !!explicit });
     for (const w of result.wired) console.log(`wired: ${w}`);
     for (const s of result.skipped) console.log(`skipped: ${s}`);
     if (result.wired.length === 0 && result.skipped.length === 0) {
