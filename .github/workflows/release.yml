@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.5"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package release tarball
+        run: |
+          mkdir -p release/js-codebase-mem
+          cp -r dist release/js-codebase-mem/dist
+          cp -r grammars release/js-codebase-mem/grammars
+          cp package.json package-lock.json README.md LICENSE release/js-codebase-mem/ 2>/dev/null || true
+          tar -czf js-codebase-mem-${{ github.ref_name }}.tar.gz -C release js-codebase-mem
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: js-codebase-mem-${{ github.ref_name }}.tar.gz
+          generate_release_notes: true

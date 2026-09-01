@@ -66,6 +66,19 @@ Kiro, Droid, and opencode can plug into straight away.
 
 **Requirement:** Node.js ≥ 22.5 (uses the built-in `node:sqlite` — no native compilation).
 
+**Option A — prebuilt release (no build step):**
+
+Download the latest `js-codebase-mem-*.tar.gz` from the [Releases page](https://github.com/kholgade/js-codebase-mem/releases), then:
+
+```bash
+tar -xzf js-codebase-mem-*.tar.gz
+cd js-codebase-mem
+npm install --omit=dev   # runtime deps only, no compiling
+npm link                 # exposes the short `jcbm` command on your PATH
+```
+
+**Option B — build from source:**
+
 ```bash
 npm install
 npm run build          # compiles the CLI, MCP server, and web UI
