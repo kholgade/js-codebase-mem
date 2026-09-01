@@ -1,55 +1,169 @@
 # js-codebase-mem
 
-Node.js code intelligence engine: parse a codebase with tree-sitter into a persistent
-knowledge graph, store it in SQLite (`node:sqlite`, built-in), and query it over MCP + CLI
-with vector semantic search.
+<p align="center">
+  <a href="https://github.com/kholgade/js-codebase-mem"><img alt="type" src="https://img.shields.io/badge/type-knowledge%20graph-teal?style=for-the-badge"></a>
+  <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue?style=for-the-badge">
+  <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen?style=for-the-badge">
+</p>
 
-A TypeScript/ESM port of the algorithms and logic of
-[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) ("pure C"),
-scoped to **8 languages** with **zero native compilation** and an extensible per-language
-plugin contract.
+<p align="center">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-orange">
+  <a href="skills/memory-graph/SKILL.md"><img alt="agent skill" src="https://img.shields.io/badge/agent_skill-ready-green"></a>
+  <a href="docs/agent-integration.md"><img alt="mcp" src="https://img.shields.io/badge/MCP-5_agents-blueviolet"></a>
+  <a href="#usage-for-ai-agents-mcp--skill"><img alt="languages" src="https://img.shields.io/badge/languages-8-lightgrey"></a>
+</p>
 
-## Status
+**Understand a codebase in seconds — not by re-reading every file.**
 
-Phase 0 scaffold — runnable vertical slice of the pipeline:
+js-codebase-mem turns any repository into a living knowledge graph: what
+symbols exist, what calls what, what imports what, and how your web routes
+wire up. Ingest once, then answer "how does this work?", "who depends on
+this?", or "what breaks if I change that?" instantly — with zero context,
+zero full-file scans, and no huge context windows burned.
 
-- ✅ Project skeleton, `node:sqlite` store, schema, migrations
-- ✅ `LanguagePlugin` contract + `LanguageRegistry` (8 languages registered)
-- ✅ File walking + ignore rules + File-node indexing
-- ✅ `index` and `cli list_projects` commands
-- 🔜 tree-sitter WASM parse (web-tree-sitter) + extraction
-- 🔜 MCP server (15 tools), semantic search, resolvers
+It's built for **you and your AI coding agents**. The same graph powers a human
+CLI, a click-through 3D web UI, and a standard MCP server that Claude, Codex,
+Kiro, Droid, and opencode can plug into straight away.
 
-See [DESIGN.md](DESIGN.md) for the full architecture.
+> A zero-native-compile TypeScript/ESM implementation of the ideas behind
+> [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp),
+> covering **8 languages** out of the box and extensible to more.
 
-## Requirements
+---
 
-- Node.js ≥ 22.5 (uses built-in `node:sqlite`)
+## Why you'll like it
 
-## Setup
+| Pain point | What js-codebase-mem does |
+| --- | --- |
+| **"Why are my agents slow?"** | Agents ask the graph instead of scanning files. This repo indexed in **~50 ms** — 64 files → 611 symbols → 1,168 relationships. |
+| **"I lose the big picture"** | One command gives you project structure, call flows, and architecture overview. |
+| **"Every change feels risky"** | `detect_changes` tells you the blast radius — who depends on what you're touching. |
+| **"I don't know where things are"** | Search by name, semantic meaning, or raw graph query. `get_code_snippet` returns the exact source, not a needle in a haystack. |
+| **"My context window fills up"** | Queries return structured answers (symbols, call paths, files) — not hundreds of file dumps. |
+| **"Tools are siloed"** | One graph, four surfaces: CLI for humans, web UI for browsing, MCP for agents, and a portable *skill* any agent can load. |
+
+### Who it's for
+- **Developers** landing in an unfamiliar or long-forgotten repo.
+- **Teams** that want shared architectural memory, not tribal knowledge.
+- **AI coding agents** that should reason about a codebase instead of brute-forcing it.
+
+---
+
+## Highlights
+
+- **Persistent memory** — index once, query for weeks; incremental re-indexes keep it fresh.
+- **8 languages** — JavaScript/TypeScript, Python, Java, Go, Rust, C++, C#, C.
+- **Agent-ready** — ships a portable **skill** (`skills/memory-graph`) plus MCP wiring for `opencode`, `Claude Code`, `Codex`, `Kiro`, and `Droid`.
+- **MCP server** — 16 tools for graph, call-path, semantic, and architecture queries.
+- **3D web UI** — spin up a clickable graph with node details, edge labels, and PNG/SVG export.
+- **Multi-signal search** — FTS + TF-IDF + AST/signature overlap + optional real embeddings.
+- **Team-shared artifacts** — export/import the graph with versioned, compressed, merge-ready files.
+- **Smart delta** — detect changes and get impacted-code blast radius, not a blind diff.
+
+---
+
+## Getting started
+
+**Requirement:** Node.js ≥ 22.5 (uses the built-in `node:sqlite` — no native compilation).
 
 ```bash
 npm install
-node scripts/build-grammars.mjs   # writes grammars/manifest.json (then download .wasm files)
-npm run build
+npm run build          # compiles the CLI, MCP server, and web UI
 ```
 
-## Usage
+> Keep grammars fresh:
+> `npm run build:grammars` downloads the tree-sitter `.wasm` files.
+
+### Usage for humans (CLI)
 
 ```bash
-# Index a repository into the graph
-node dist/cli/index.js index /path/to/repo --project my-project
+# Index a repository once (fast, idempotent, incremental)
+node dist/cli/index.js index /path/to/repo --project team-service
 
-# List projects
-node dist/cli/index.js cli list_projects
+# What does the project look like? (languages, packages, modules)
+node dist/cli/index.js cli get_architecture --project team-service
+
+# Find a symbol and get its exact source
+node dist/cli/index.js cli search_code --project team-service --pattern "getUser"
+node dist/cli/index.js cli get_code_snippet --project team-service --qualified-name "src/auth.getUser"
+
+# Who calls a function? (its blast radius / impact)
+node dist/cli/index.js cli trace_path --project team-service --function-name getUser --direction inbound
+
+# "What breaks if I change a file?" — impact analysis, not a blind diff
+node dist/cli/index.js cli detect_changes --project team-service --repo-path /path/to/repo
+
+# Semantic search — "the thing that connects to the payment provider"
+node dist/cli/index.js cli build_index --project team-service       # one-time
+node dist/cli/index.js cli semantic_query --project team-service --query "payment integration"
 ```
 
-The graph persists to `~/.cache/js-codebase-mem/graphs.db` (override with `CBM_CACHE_DIR`).
+### Usage for browsers (web UI)
 
-## Language plugin contract
+```bash
+node dist/cli/index.js serve-ui 4173
+# open http://localhost:4173 — browse the graph, click any node for its details,
+# follow edge labels, flip between layouts, and export a PNG/SVG of your architecture.
+```
 
-A new language is a single module implementing `LanguagePlugin`
-(`src/languages/contract.ts`):
+### Usage for AI agents (MCP + skill)
+
+Agents plug in through a standard MCP server plus a portable skill — nothing to
+hand-wire:
+
+```bash
+# Auto-detect installed agents (Claude Code, Cursor, Cline, VS Code, Codex,
+# OpenCode) and register js-codebase-mem as an MCP server in their config:
+node dist/cli/index.js install       # what got wired
+node dist/cli/index.js uninstall     # remove it again
+
+# Or copy the portable skill + print per-agent snippets for the rest
+# (opencode, Claude, Codex, Kiro, Droid):
+node scripts/install-skill.mjs            # copies the skill to auto-loaded dirs
+node scripts/install-skill.mjs --opencode # ...and registers the MCP server in opencode
+```
+
+Then just ask your agent:
+
+> *"Using the memory-graph, who calls `getUser`, and what happens to it if I change the auth module?"*
+
+The agent answers from the graph — no slow per-file scan, tiny context cost.
+Full recipes and per-agent setup (including Codex TOML, Kiro `env.PATH`, Droid
+frontmatter) live in **[docs/agent-integration.md](docs/agent-integration.md)**.
+
+### Sharing the graph with your team
+
+```bash
+node dist/cli/index.js export_artifact --project team-service --dest team-service.cbm
+node dist/cli/index.js import_artifact --src team-service.cbm --project team-service
+```
+
+Versioned, compressed artifacts can be diffed and merged — so an onboarding
+teammate gets your team's architectural memory in a single file.
+
+---
+
+## The 16 MCP tools at a glance
+
+| Tool | Ask it to… |
+| --- | --- |
+| `index_repository` / `index_status` | build & monitor the graph |
+| `get_architecture` / `get_graph_schema` | summarize the project |
+| `search_graph` / `search_code` | find a symbol by name/pattern |
+| `query_graph` | run a Cypher-like query (variable-length paths, aggregates) |
+| `trace_path` / `detect_changes` | map call flows & blast radius |
+| `get_code_snippet` | pull exact source without a scan |
+| `semantic_query` / `build_index` | meaning-based search |
+| `ingest_traces` / `manage_adr` | record runtime behavior & decisions |
+
+See **[docs/api-reference.md](docs/api-reference.md)** for every tool and command.
+
+---
+
+## Add a language (plugin)
+
+Adding a language is one module — the schema, query engine, and MCP surface
+don't change. See **[docs/language-support.md](docs/language-support.md)**:
 
 ```ts
 const plugin: LanguagePlugin = {
@@ -58,10 +172,21 @@ const plugin: LanguagePlugin = {
   wasmPath: '.../rust.wasm',
   query: '...',                 // tree-sitter query -> Emit[]
   contextualize(ctx, emits) {}, // qualify names, module scope
-  resolver,                     // optional deep type resolution
 };
-registry.register(plugin);      // that's it — schema/query engine/MCP unchanged
+registry.register(plugin);      // done
 ```
+
+---
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) — components, schema, data flow
+- [docs/query-language.md](docs/query-language.md) — the supported openCypher subset
+- [docs/agent-integration.md](docs/agent-integration.md) — skill + MCP for every agent
+- [docs/language-support.md](docs/language-support.md) — how to add languages/grammars
+- [docs/usage.md](docs/usage.md) — deep dive, embedding setup, troubleshooting
+
+---
 
 ## License
 
