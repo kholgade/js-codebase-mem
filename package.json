@@ -1,0 +1,43 @@
+{
+  "name": "js-codebase-mem",
+  "version": "0.1.0",
+  "description": "Node.js code intelligence engine: tree-sitter knowledge graph + semantic search over 8 languages. MCP server + CLI. TypeScript/ESM, zero native compile.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "bin": {
+    "js-codebase-mem": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "grammars"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:grammars": "node scripts/build-grammars.mjs",
+    "dev": "tsx watch src/cli/index.ts",
+    "start": "node dist/cli/index.js",
+    "test": "node --test 'test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "web-tree-sitter": "^0.26.13",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tree-sitter-c-sharp": "^0.23.5",
+    "tree-sitter-cpp": "^0.23.4",
+    "tree-sitter-go": "^0.25.0",
+    "tree-sitter-java": "^0.23.5",
+    "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-rust": "^0.24.0",
+    "tree-sitter-typescript": "^0.23.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
