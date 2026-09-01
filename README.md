@@ -2,12 +2,12 @@
 
 <p align="center">
   <a href="https://github.com/kholgade/js-codebase-mem"><img alt="type" src="https://img.shields.io/badge/type-knowledge%20graph-teal?style=for-the-badge"></a>
-  <img alt="version" src="https://img.shields.io/badge/version-0.1.0-blue?style=for-the-badge">
+  <a href="https://github.com/kholgade/js-codebase-mem/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/kholgade/js-codebase-mem?style=for-the-badge&label=release"></a>
   <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen?style=for-the-badge">
 </p>
 
 <p align="center">
-  <img alt="license" src="https://img.shields.io/badge/license-MIT-orange">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT%20with%20attribution-orange"></a>
   <a href="skills/memory-graph/SKILL.md"><img alt="agent skill" src="https://img.shields.io/badge/agent_skill-ready-green"></a>
   <a href="docs/agent-integration.md"><img alt="mcp" src="https://img.shields.io/badge/MCP-5_agents-blueviolet"></a>
   <a href="#usage-for-ai-agents-mcp--skill"><img alt="languages" src="https://img.shields.io/badge/languages-8-lightgrey"></a>
@@ -68,10 +68,14 @@ Kiro, Droid, and opencode can plug into straight away.
 
 **Option A — prebuilt release (no build step):**
 
-Download the latest `js-codebase-mem-*.tar.gz` from the [Releases page](https://github.com/kholgade/js-codebase-mem/releases), then:
+Grab the latest release tarball straight from the command line, or download it
+manually from the [Releases page](https://github.com/kholgade/js-codebase-mem/releases):
 
 ```bash
-tar -xzf js-codebase-mem-*.tar.gz
+curl -L -o jcbm.tar.gz \
+  "$(curl -s https://api.github.com/repos/kholgade/js-codebase-mem/releases/latest \
+     | grep browser_download_url | cut -d '"' -f 4)"
+tar -xzf jcbm.tar.gz
 cd js-codebase-mem
 npm install --omit=dev   # runtime deps only, no compiling
 npm link                 # exposes the short `jcbm` command on your PATH
@@ -210,4 +214,8 @@ registry.register(plugin);      // done
 
 ## License
 
-MIT
+MIT with an attribution requirement — see [LICENSE](LICENSE). Any fork,
+redistribution, or derivative work must credit both this project
+([js-codebase-mem](https://github.com/kholgade/js-codebase-mem)) and the
+project it's inspired by,
+[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp).

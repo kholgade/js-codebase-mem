@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Node.js code intelligence engine: tree-sitter knowledge graph + semantic search over 8 languages. MCP server + CLI. TypeScript/ESM, zero native compile.",
   "type": "module",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=22.5.0"
   },
